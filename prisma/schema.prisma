@@ -376,8 +376,8 @@ model ProductVariant {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  orderItems OrderItem[]
-  cartItems  CartItem[]
+  orderItems    OrderItem[]
+  cartItems     CartItem[]
   inventoryLogs InventoryLog[]
 
   @@index([productId])
@@ -392,19 +392,19 @@ enum StockMovementType {
 }
 
 model InventoryLog {
-  id            String            @id @default(cuid())
-  variantId     String
-  variant       ProductVariant     @relation(fields: [variantId], references: [id], onDelete: Cascade)
-  shopkeeperId  String
-  shopkeeper    Shopkeeper         @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
-  type          StockMovementType
+  id             String            @id @default(cuid())
+  variantId      String
+  variant        ProductVariant    @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  shopkeeperId   String
+  shopkeeper     Shopkeeper        @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  type           StockMovementType
   quantityChange Int
-  previousQty   Int
-  newQty        Int
-  note          String?
-  referenceType String?
-  referenceId   String?
-  createdAt     DateTime          @default(now())
+  previousQty    Int
+  newQty         Int
+  note           String?
+  referenceType  String?
+  referenceId    String?
+  createdAt      DateTime          @default(now())
 
   @@index([variantId, createdAt])
   @@index([shopkeeperId, createdAt])
@@ -441,6 +441,8 @@ model User {
   name         String?
   phone        String?
   gender       Gender        @default(MALE)
+  dateOfBirth  DateTime?
+  avatar       String?
   profileimage String
   cart         Cart?
   customer     Customer?
@@ -457,30 +459,27 @@ enum Gender {
 }
 
 model Customer {
-  id           String       @id @default(uuid())
-  createdAt    DateTime     @default(now())
-  userid       String       @unique
-  Shopname     String?      @unique
-  Shopnumber   String?
-  GSTnumber    String?      @unique
-  Adhaarnumber String?      @unique
-  user         User         @relation(fields: [userid], references: [id])
+  id           String    @id @default(uuid())
+  createdAt    DateTime  @default(now())
+  userid       String    @unique
+  // Buyer customers do not store shop-related fields
+  user         User      @relation(fields: [userid], references: [id])
   houseaddress Address[]
-  type         CustomerType @default(RETAILER)
+  // Removed `type` for buyer-only customers
   orders       Order[]
 }
 
 model Shopkeeper {
-  id          String            @id @default(uuid())
-  createdAt   DateTime          @default(now())
-  userid      String            @unique
-  shopname    String
-  user        User              @relation(fields: [userid], references: [id])
-  shopaddress Address[]
-  category    Category[]
-  Item        Item[]
-  orders      Order[]
-  shopImages  ShopkeeperImage[]
+  id            String            @id @default(uuid())
+  createdAt     DateTime          @default(now())
+  userid        String            @unique
+  shopname      String
+  user          User              @relation(fields: [userid], references: [id])
+  shopaddress   Address[]
+  category      Category[]
+  Item          Item[]
+  orders        Order[]
+  shopImages    ShopkeeperImage[]
   inventoryLogs InventoryLog[]
 }
 

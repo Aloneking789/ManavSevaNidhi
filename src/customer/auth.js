@@ -16,13 +16,26 @@ function signCustomerToken(customerId, userId) {
 }
 
 function buildProfileSelection(user) {
+    const avatar = user.avatar || user.profileimage || '';
     return {
         id: user.id,
         email: user.email,
         name: user.name,
         phone: user.phone,
-        profileimage: user.profileimage,
+        gender: user.gender,
+        dateOfBirth: user.dateOfBirth,
+        avatar,
+        profileimage: avatar,
     };
+}
+
+function parseValidDate(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 authRouter.post('/signup', async (req, res) => {
@@ -30,14 +43,11 @@ authRouter.post('/signup', async (req, res) => {
         email,
         password,
         name,
+        gender,
+        dateOfBirth,
         phone,
+        avatar,
         profileimage,
-        type,
-        shopname,
-        Shopname,
-        Shopnumber,
-        GSTnumber,
-        Adhaarnumber,
         city,
         state,
         pincode,
@@ -46,8 +56,11 @@ authRouter.post('/signup', async (req, res) => {
         longitude,
     } = req.body;
 
-    if (!email || !password) {
-        return res.status(400).json({ success: false, message: 'email and password are required' });
+    const resolvedAvatar = avatar || profileimage;
+    const parsedDateOfBirth = parseValidDate(dateOfBirth);
+
+    if (!email || !password || !name || !gender || !parsedDateOfBirth || !resolvedAvatar) {
+        return res.status(400).json({ success: false, message: 'email, password, name, gender, dateOfBirth, and avatar are required' });
     }
 
     try {
@@ -63,17 +76,15 @@ authRouter.post('/signup', async (req, res) => {
         const created = await prisma.user.create({
             data: {
                 email,
-            password: password,
+                password: password,
                 name: name || email.split('@')[0],
+                gender,
+                dateOfBirth: parsedDateOfBirth,
                 phone: phone || null,
-                profileimage: profileimage || '',
+                avatar: resolvedAvatar,
+                profileimage: resolvedAvatar,
                 customer: {
                     create: {
-                        type: type || 'RETAILER',
-                        Shopname: shopname || Shopname || null,
-                        Shopnumber: Shopnumber || null,
-                        GSTnumber: GSTnumber || null,
-                        Adhaarnumber: Adhaarnumber || null,
                         ...(city && state && pincode && flatnumber !== undefined
                             ? {
                                 houseaddress: {
@@ -166,6 +177,9 @@ authRouter.get('/profile', customerMiddleware, async (req, res) => {
                         email: true,
                         name: true,
                         phone: true,
+                        gender: true,
+                        dateOfBirth: true,
+                        avatar: true,
                         profileimage: true,
                     },
                 },
@@ -186,19 +200,24 @@ authRouter.get('/profile', customerMiddleware, async (req, res) => {
 
 authRouter.put('/profile', customerMiddleware, async (req, res) => {
     try {
-        const { name, phone, profileimage, shopname, Shopname, Shopnumber, GSTnumber, Adhaarnumber, type } = req.body;
+        const { name, phone, gender, dateOfBirth, avatar, profileimage } = req.body;
         const userUpdate = {};
-        const customerUpdate = {};
 
         if (name !== undefined) userUpdate.name = name;
         if (phone !== undefined) userUpdate.phone = phone;
-        if (profileimage !== undefined) userUpdate.profileimage = profileimage;
-        if (shopname !== undefined) customerUpdate.Shopname = shopname;
-        if (Shopname !== undefined) customerUpdate.Shopname = Shopname;
-        if (Shopnumber !== undefined) customerUpdate.Shopnumber = Shopnumber;
-        if (GSTnumber !== undefined) customerUpdate.GSTnumber = GSTnumber;
-        if (Adhaarnumber !== undefined) customerUpdate.Adhaarnumber = Adhaarnumber;
-        if (type !== undefined) customerUpdate.type = type;
+        if (gender !== undefined) userUpdate.gender = gender;
+        if (dateOfBirth !== undefined) {
+            const parsedDateOfBirthUpdate = parseValidDate(dateOfBirth);
+            if (dateOfBirth && !parsedDateOfBirthUpdate) {
+                return res.status(400).json({ success: false, message: 'Invalid dateOfBirth' });
+            }
+            userUpdate.dateOfBirth = parsedDateOfBirthUpdate;
+        }
+        if (avatar !== undefined || profileimage !== undefined) {
+            const nextAvatar = avatar || profileimage;
+            userUpdate.avatar = nextAvatar;
+            userUpdate.profileimage = nextAvatar;
+        }
 
         const customer = await prisma.customer.findUnique({
             where: { id: req.customerid },
@@ -213,13 +232,6 @@ authRouter.put('/profile', customerMiddleware, async (req, res) => {
             await prisma.user.update({
                 where: { id: customer.userid },
                 data: userUpdate,
-            });
-        }
-
-        if (Object.keys(customerUpdate).length) {
-            await prisma.customer.update({
-                where: { id: req.customerid },
-                data: customerUpdate,
             });
         }
 

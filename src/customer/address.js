@@ -6,7 +6,7 @@ export const addressRouter = Router();
 
 // Add a new address for a customer by customer id
 addressRouter.post('/add', customerMiddleware, async (req, res) => {
-    const { city, state, pincode, flatnumber, shopname, shopnumber, gstnumber, adhaarnumber, type, latitude, longitude } = req.body;
+    const { city, state, pincode, flatnumber, latitude, longitude } = req.body;
     const customerid = req.customerid;
     try {
         const customer = await prisma.customer.findUnique({ where: { id: customerid } });
@@ -15,11 +15,6 @@ addressRouter.post('/add', customerMiddleware, async (req, res) => {
         }
         // Prepare optional customer update data only for provided fields
         const updateData = {};
-        if (shopname) updateData.Shopname = shopname;
-        if (shopnumber) updateData.Shopnumber = shopnumber;
-        if (gstnumber) updateData.GSTnumber = gstnumber;
-        if (adhaarnumber) updateData.Adhaarnumber = adhaarnumber;
-        if (type) updateData.type = type;
 
         const addressCreate = prisma.address.create({
             data: {
@@ -48,7 +43,7 @@ addressRouter.post('/add', customerMiddleware, async (req, res) => {
         res.status(201).json({ success: true, address: newAddress });
     } catch (err) {
         console.error(err);
-        // Handle Prisma unique constraint error (e.g., Shopname/GST/Adhaar unique)
+        // Handle Prisma unique constraint error
         if (err && err.code === 'P2002') {
             return res.status(400).json({ success: false, message: 'Unique constraint failed', details: err.meta });
         }

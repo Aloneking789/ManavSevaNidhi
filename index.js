@@ -45,3 +45,5 @@ app.use((err, req, res, next) => {
     "message": "internal server error"
   })
 })
+
+export default app;
