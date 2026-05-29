@@ -16,7 +16,7 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
     try {
         const customer = await prisma.customer.findUnique({
             where: { id: req.customerid },
-            select: { id: true, type: true }
+            select: { id: true }
         });
         if (!customer) return res.status(404).json({ success: false, message: "Customer not found" });
 
@@ -34,25 +34,12 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
             select: {
                 id: true,
                 shopkeeperId: true,
-                minimumpurchase: true,
-                wholesaleprice: true,
-                retailprice: true,
-                currentQty: true
+                title: true,
+                images: true
             }
         });
         if (dbItems.length !== itemIds.length)
             return res.status(400).json({ success: false, message: "Some items not found" });
-
-        // Check stock availability
-        const itemQtyMap = {};
-        for (const reqItem of items) {
-            itemQtyMap[reqItem.itemId] = (itemQtyMap[reqItem.itemId] || 0) + reqItem.quantity;
-        }
-        for (const dbItem of dbItems) {
-            if (dbItem.currentQty < itemQtyMap[dbItem.id]) {
-                return res.status(400).json({ success: false, message: `Insufficient stock for item ${dbItem.id}` });
-            }
-        }
 
         const shopkeeperSet = new Set(dbItems.map(i => i.shopkeeperId));
         if (shopkeeperSet.size !== 1)
@@ -61,7 +48,7 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
 
         // Fetch any variants referenced by client
         const variantIds = [...new Set(items.map(i => i.variantId).filter(Boolean))];
-        const dbVariants = variantIds.length ? await prisma.variant.findMany({ where: { id: { in: variantIds } }, select: { id: true, price: true, itemId: true } }) : [];
+        const dbVariants = variantIds.length ? await prisma.productVariant.findMany({ where: { id: { in: variantIds } }, select: { id: true, mrp: true, sellingPrice: true, productId: true, name: true, sku: true, stockQty: true, product: { select: { id: true, title: true, images: true } } } }) : [];
         const variantMap = new Map(dbVariants.map(v => [v.id, v]));
 
         let total = 0;
@@ -72,35 +59,38 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
             if (!Number.isInteger(quantity) || quantity <= 0)
                 return res.status(400).json({ success: false, message: `Invalid quantity for item ${dbItem?.id}` });
 
-            let unitPrice;
-            if (reqItem.variantId) {
-                const foundVariant = variantMap.get(reqItem.variantId);
-                if (!foundVariant) return res.status(400).json({ success: false, message: `Variant ${reqItem.variantId} not found` });
-                if (foundVariant.itemId !== dbItem.id) return res.status(400).json({ success: false, message: `Variant does not belong to item ${dbItem.id}` });
-                unitPrice = Number(foundVariant.price);
-            } else if (reqItem.variant && reqItem.variant.price != null) {
-                unitPrice = Number(reqItem.variant.price);
-            } else if (customer.type === "WHOLESALER") {
-                const threshold = dbItem.minimumpurchase || 0;
-                if (quantity >= threshold && dbItem.wholesaleprice != null) {
-                    unitPrice = Number(dbItem.wholesaleprice);
-                } else {
-                    unitPrice = Number(dbItem.retailprice);
-                }
-            } else {
-                unitPrice = Number(dbItem.retailprice);
+            const foundVariant = reqItem.variantId ? variantMap.get(reqItem.variantId) : null;
+            if (!foundVariant) {
+                return res.status(400).json({ success: false, message: `Variant ${reqItem.variantId || ''} not found` });
             }
-            if (unitPrice == null || isNaN(unitPrice))
+            if (foundVariant.productId !== dbItem.id) {
+                return res.status(400).json({ success: false, message: `Variant does not belong to item ${dbItem.id}` });
+            }
+            if (foundVariant.stockQty < quantity) {
+                return res.status(400).json({ success: false, message: `Insufficient stock for variant ${foundVariant.id}` });
+            }
+
+            const unitPrice = Number(foundVariant.sellingPrice);
+            const mrp = Number(foundVariant.mrp);
+            if (Number.isNaN(unitPrice) || Number.isNaN(mrp)) {
                 return res.status(400).json({ success: false, message: `Price missing for item ${dbItem.id}` });
+            }
 
             const lineTotal = unitPrice * quantity;
             total += lineTotal;
             orderItemsData.push({
+                productId: dbItem.id,
                 itemId: dbItem.id,
                 quantity,
-                unitPrice,
+                mrp,
+                sellingPrice: unitPrice,
                 lineTotal,
-                variantId: reqItem.variantId || null
+                total: lineTotal,
+                variantId: reqItem.variantId,
+                productName: dbItem.title,
+                variantName: foundVariant.name,
+                sku: foundVariant.sku,
+                imageUrl: dbItem.images?.[0] || null
             });
         }
 
@@ -109,12 +99,12 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
                 customerId: customer.id,
                 shopkeeperId,
                 paymentType,
-                totalPrice: total,
+                grandTotal: total,
                 deliveryAddressId: addressId,
                 orderItems: { create: orderItemsData }
             },
             include: {
-                orderItems: { include: { item: { select: { title: true, unit: true } }, variant: { select: { name: true, price: true } } } },
+                orderItems: { include: { item: { select: { title: true, unit: true } }, variant: { select: { name: true, mrp: true, sellingPrice: true, sku: true } } } },
                 deliveryAddress: { select: { city: true, state: true, pincode: true, flatnumber: true, latitude: true, longitude: true } }
             }
         });
@@ -149,14 +139,15 @@ customerOrdersRouter.get('/', customerMiddleware, async (req, res) => {
         const shaped = orders.map(o => ({
             id: o.id,
             paymentType: o.paymentType,
-            totalPrice: o.totalPrice,
+            grandTotal: o.grandTotal,
             status: o.status,
             createdAt: o.createdAt,
             orderItems: o.orderItems.map(oi => ({
                 id: oi.id,
                 quantity: oi.quantity,
-                unitPrice: oi.unitPrice,
-                lineTotal: oi.lineTotal,
+                mrp: oi.mrp,
+                sellingPrice: oi.sellingPrice,
+                total: oi.total,
                 variant: oi.variant,
                 item: oi.item
             })),
@@ -179,7 +170,7 @@ customerOrdersRouter.get('/:id', customerMiddleware, async (req, res) => {
         const order = await prisma.order.findFirst({
             where: { id: req.params.id, customerId: req.customerid },
             include: {
-                orderItems: { include: { item: { select: { title: true, images: true, unit: true } } } },
+                orderItems: { include: { item: { select: { title: true, images: true, unit: true } }, variant: { select: { name: true, mrp: true, sellingPrice: true, sku: true } } } },
                 shopkeeper: { select: { shopname: true } },
                 deliveryAddress: { select: { city: true, state: true, pincode: true, flatnumber: true, latitude: true, longitude: true } }
             }
