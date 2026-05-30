@@ -367,6 +367,68 @@ curl -X DELETE http://localhost:3000/api/v1/owner/coupons/COUPON_ID \
   -H "Authorization: Bearer YOUR_JWT"
 ```
 
+## 8. Orders
+
+### GET `/orders`
+Get all orders for the current shopkeeper.
+
+```bash
+curl http://localhost:3000/api/v1/owner/orders \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
+### PATCH `/orders/:id/confirm`
+Move an order from `PROCESSING` to `CONFIRMED` and reserve variant stock.
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/owner/orders/ORDER_ID/confirm \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
+### PATCH `/orders/:id/ship`
+Move an order from `CONFIRMED` to `SHIPPED`.
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/owner/orders/ORDER_ID/ship \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
+### PATCH `/orders/:id/out-for-delivery`
+Move an order from `SHIPPED` to `OUT_FOR_DELIVERY`.
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/owner/orders/ORDER_ID/out-for-delivery \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
+### PATCH `/orders/:id/delivered`
+Mark an order as delivered from `OUT_FOR_DELIVERY`.
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/owner/orders/ORDER_ID/delivered \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
+### PATCH `/orders/:id/cancel`
+Cancel an order and restock variants if it was already confirmed or later.
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/owner/orders/ORDER_ID/cancel \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cancelReason": "Customer unreachable"
+  }'
+```
+
+### PATCH `/orders/:id/reject`
+Reject an order while it is still `PROCESSING`.
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/owner/orders/ORDER_ID/reject \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
 ## Notes
 
 The inventory routes also expose `PATCH` actions for toggling product/variant active state and updating stock quantities. Those are available in the codebase, but this reference intentionally focuses on `GET`, `POST`, `PUT`, and `DELETE` for the sections requested.
