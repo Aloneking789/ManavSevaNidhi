@@ -1,0 +1,394 @@
+import { Router } from "express";
+import { prisma } from '../../config/prismaConfig.js';
+import { customerMiddleware } from "../../middlewares/customerAuth.js";
+
+export const customerCartRouter = Router();
+
+function isCouponApplicableToItems(coupon, items) {
+    const applicableOn = Array.isArray(coupon?.applicableOn) ? coupon.applicableOn : [];
+    if (applicableOn.length === 0) return true;
+
+    return items.some((item) => applicableOn.includes(item.productId) || (item.product.categoryId && applicableOn.includes(item.product.categoryId)));
+}
+
+function parsePositiveInt(value, fallback = 1) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+async function getOrCreateCart(customerId) {
+    const customer = await prisma.customer.findUnique({
+        where: { id: customerId },
+        select: { userid: true }
+    });
+
+    if (!customer) {
+        throw new Error('Customer not found');
+    }
+
+    return prisma.cart.upsert({
+        where: { userId: customer.userid },
+        update: {},
+        create: { userId: customer.userid }
+    });
+}
+
+async function loadCart(customerId) {
+    const customer = await prisma.customer.findUnique({
+        where: { id: customerId },
+        select: { userid: true }
+    });
+
+    if (!customer) {
+        return null;
+    }
+
+    return prisma.cart.findUnique({
+        where: { userId: customer.userid },
+        include: {
+            coupon: true,
+            items: {
+                include: {
+                    product: { select: { id: true, title: true, images: true, slug: true, categoryId: true, shopkeeperId: true } },
+                    variant: { select: { id: true, name: true, sku: true, mrp: true, sellingPrice: true, stockQty: true, lowStockAlert: true, isActive: true, productId: true } }
+                },
+                orderBy: { addedAt: 'desc' }
+            }
+        }
+    });
+}
+
+function shapeCart(cart) {
+    if (!cart) {
+        return { id: null, coupon: null, items: [], subtotal: 0, itemCount: 0 };
+    }
+
+    const items = cart.items.map((item) => ({
+        id: item.id,
+        quantity: item.quantity,
+        addedAt: item.addedAt,
+        product: item.product,
+        variant: item.variant,
+        lineTotal: Number(item.variant.sellingPrice) * item.quantity
+    }));
+
+    const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+
+    return {
+        id: cart.id,
+        coupon: cart.coupon,
+        items,
+        subtotal,
+        itemCount: items.length
+    };
+}
+
+function isCouponValid(coupon, subtotal) {
+    const now = new Date();
+    if (!coupon) return { valid: false, message: 'Coupon not found' };
+    if (coupon.status !== 'ACTIVE') return { valid: false, message: 'Coupon is not active' };
+    if (coupon.startDate && coupon.startDate > now) return { valid: false, message: 'Coupon is not active yet' };
+    if (coupon.endDate && coupon.endDate < now) return { valid: false, message: 'Coupon has expired' };
+    if (coupon.minOrderAmount && subtotal < Number(coupon.minOrderAmount)) return { valid: false, message: 'Order amount is below coupon minimum' };
+    if (coupon.usageLimit !== null && coupon.usageLimit !== undefined && coupon.usedCount >= coupon.usageLimit) return { valid: false, message: 'Coupon usage limit reached' };
+    return { valid: true };
+}
+
+function calculateCouponDiscount(coupon, subtotal) {
+    if (!coupon) return 0;
+    const amount = Number(subtotal || 0);
+    const value = Number(coupon.discountValue || 0);
+    let discount = 0;
+
+    if (coupon.discountType === 'PERCENTAGE') {
+        discount = (amount * value) / 100;
+        if (coupon.maxDiscountAmount !== null && coupon.maxDiscountAmount !== undefined) {
+            discount = Math.min(discount, Number(coupon.maxDiscountAmount));
+        }
+    } else if (coupon.discountType === 'FLAT') {
+        discount = value;
+    }
+
+    return Math.max(0, Math.min(discount, amount));
+}
+
+customerCartRouter.get('/', customerMiddleware, async (req, res) => {
+    try {
+        const cart = await loadCart(req.customerid);
+        return res.json({ success: true, cart: shapeCart(cart) });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, message: 'Something went wrong' });
+    }
+});
+
+customerCartRouter.post('/items', customerMiddleware, async (req, res) => {
+    const { itemId, variantId, quantity = 1 } = req.body;
+    if (!itemId || !variantId) {
+        return res.status(400).json({ success: false, message: 'itemId and variantId are required' });
+    }
+
+    const qty = parsePositiveInt(quantity);
+
+    try {
+        const product = await prisma.item.findFirst({ where: { id: itemId, isActive: true } });
+        if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+        const variant = await prisma.productVariant.findFirst({
+            where: { id: variantId, productId: itemId, isActive: true },
+            select: { id: true, stockQty: true }
+        });
+        if (!variant) return res.status(404).json({ success: false, message: 'Variant not found' });
+
+        const cart = await getOrCreateCart(req.customerid);
+        const existing = await prisma.cartItem.findUnique({
+            where: { cartId_variantId: { cartId: cart.id, variantId } }
+        });
+
+        const nextQuantity = (existing?.quantity || 0) + qty;
+        if (nextQuantity > variant.stockQty) {
+            return res.status(400).json({ success: false, message: 'Insufficient stock for this variant' });
+        }
+
+        await prisma.cartItem.upsert({
+            where: { cartId_variantId: { cartId: cart.id, variantId } },
+            update: { quantity: nextQuantity },
+            create: { cartId: cart.id, productId: itemId, variantId, quantity: qty }
+        });
+
+        const updatedCart = await loadCart(req.customerid);
+        return res.status(201).json({ success: true, cart: shapeCart(updatedCart) });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, message: 'Something went wrong' });
+    }
+});
+
+customerCartRouter.put('/items/:variantId', customerMiddleware, async (req, res) => {
+    const { variantId } = req.params;
+    const { quantity } = req.body;
+    const qty = parsePositiveInt(quantity, 0);
+    if (qty <= 0) {
+        return res.status(400).json({ success: false, message: 'quantity must be a positive integer' });
+    }
+
+    try {
+        const customer = await prisma.customer.findUnique({ where: { id: req.customerid }, select: { userid: true } });
+        if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+        const cart = await prisma.cart.findUnique({ where: { userId: customer.userid } });
+        if (!cart) return res.status(404).json({ success: false, message: 'Cart not found' });
+
+        const cartItem = await prisma.cartItem.findUnique({ where: { cartId_variantId: { cartId: cart.id, variantId } } });
+        if (!cartItem) return res.status(404).json({ success: false, message: 'Cart item not found' });
+
+        const variant = await prisma.productVariant.findUnique({ where: { id: variantId }, select: { stockQty: true } });
+        if (!variant) return res.status(404).json({ success: false, message: 'Variant not found' });
+        if (qty > variant.stockQty) {
+            return res.status(400).json({ success: false, message: 'Insufficient stock for this variant' });
+        }
+
+        await prisma.cartItem.update({ where: { cartId_variantId: { cartId: cart.id, variantId } }, data: { quantity: qty } });
+
+        const updatedCart = await loadCart(req.customerid);
+        return res.json({ success: true, cart: shapeCart(updatedCart) });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, message: 'Something went wrong' });
+    }
+});
+
+customerCartRouter.delete('/items/:variantId', customerMiddleware, async (req, res) => {
+    const { variantId } = req.params;
+    try {
+        const customer = await prisma.customer.findUnique({ where: { id: req.customerid }, select: { userid: true } });
+        if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+        const cart = await prisma.cart.findUnique({ where: { userId: customer.userid } });
+        if (!cart) return res.status(404).json({ success: false, message: 'Cart not found' });
+
+        await prisma.cartItem.deleteMany({ where: { cartId: cart.id, variantId } });
+
+        const updatedCart = await loadCart(req.customerid);
+        return res.json({ success: true, cart: shapeCart(updatedCart) });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, message: 'Something went wrong' });
+    }
+});
+
+customerCartRouter.delete('/clear', customerMiddleware, async (req, res) => {
+    try {
+        const customer = await prisma.customer.findUnique({ where: { id: req.customerid }, select: { userid: true } });
+        if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+        const cart = await prisma.cart.findUnique({ where: { userId: customer.userid } });
+        if (!cart) return res.status(404).json({ success: false, message: 'Cart not found' });
+
+        await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
+        await prisma.cart.update({ where: { id: cart.id }, data: { couponId: null } });
+
+        return res.json({ success: true, message: 'Cart cleared' });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, message: 'Something went wrong' });
+    }
+});
+
+customerCartRouter.post('/coupon/apply', customerMiddleware, async (req, res) => {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ success: false, message: 'code is required' });
+
+    try {
+        const cart = await loadCart(req.customerid);
+        if (!cart || cart.items.length === 0) {
+            return res.status(400).json({ success: false, message: 'Cart is empty' });
+        }
+
+        const customer = await prisma.customer.findUnique({ where: { id: req.customerid }, select: { id: true, userid: true } });
+        if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+        const coupon = await prisma.coupon.findUnique({ where: { code } });
+        const subtotal = shapeCart(cart).subtotal;
+        const validation = isCouponValid(coupon, subtotal);
+        if (!validation.valid) {
+            return res.status(400).json({ success: false, message: validation.message });
+        }
+
+        if (coupon.isFirstOrder) {
+            const orderCount = await prisma.order.count({ where: { customerId: req.customerid } });
+            if (orderCount > 0) {
+                return res.status(400).json({ success: false, message: 'Coupon is only valid on the first order' });
+            }
+        }
+
+        if (!isCouponApplicableToItems(coupon, cart.items)) {
+            return res.status(400).json({ success: false, message: 'Coupon does not apply to these products' });
+        }
+
+        const userUsageCount = await prisma.couponUsage.count({
+            where: { couponId: coupon.id, userId: customer.userid }
+        });
+        if (coupon.usageLimitPerUser !== null && coupon.usageLimitPerUser !== undefined && userUsageCount >= coupon.usageLimitPerUser) {
+            return res.status(400).json({ success: false, message: 'Coupon usage limit per user reached' });
+        }
+
+        await prisma.cart.update({ where: { userId: customer.userid }, data: { couponId: coupon.id } });
+
+        const updatedCart = await loadCart(req.customerid);
+        const shaped = shapeCart(updatedCart);
+        const discount = calculateCouponDiscount(updatedCart.coupon, shaped.subtotal);
+
+        return res.json({ success: true, cart: { ...shaped, discount, total: shaped.subtotal - discount } });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, message: 'Something went wrong' });
+    }
+});
+
+customerCartRouter.delete('/coupon', customerMiddleware, async (req, res) => {
+    try {
+        const customer = await prisma.customer.findUnique({ where: { id: req.customerid }, select: { userid: true } });
+        if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+        const cart = await prisma.cart.findUnique({ where: { userId: customer.userid } });
+        if (!cart) return res.status(404).json({ success: false, message: 'Cart not found' });
+
+        await prisma.cart.update({ where: { id: cart.id }, data: { couponId: null } });
+        return res.json({ success: true, message: 'Coupon removed' });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, message: 'Something went wrong' });
+    }
+});
+
+customerCartRouter.post('/checkout', customerMiddleware, async (req, res) => {
+    const { addressId, paymentType } = req.body;
+    if (!addressId) return res.status(400).json({ success: false, message: 'addressId required' });
+    if (!paymentType || !['COD', 'CASH'].includes(paymentType)) {
+        return res.status(400).json({ success: false, message: 'invalid paymentType' });
+    }
+
+    try {
+        const cart = await loadCart(req.customerid);
+        if (!cart || cart.items.length === 0) {
+            return res.status(400).json({ success: false, message: 'Cart is empty' });
+        }
+
+        const customer = await prisma.customer.findUnique({ where: { id: req.customerid }, select: { id: true, userid: true } });
+        if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+        const deliveryAddress = await prisma.address.findFirst({ where: { id: addressId, customerid: customer.id } });
+        if (!deliveryAddress) {
+            return res.status(400).json({ success: false, message: 'Invalid addressId' });
+        }
+
+        const cartItems = cart.items;
+        const shopkeeperIds = new Set(cartItems.map((item) => item.product.shopkeeperId));
+        if (shopkeeperIds.size !== 1) {
+            return res.status(400).json({ success: false, message: 'All cart items must belong to one shopkeeper' });
+        }
+
+        const subtotal = cartItems.reduce((sum, item) => sum + (Number(item.variant.sellingPrice) * item.quantity), 0);
+        let discountAmount = 0;
+        let couponCode = null;
+
+        if (cart.coupon) {
+            const validation = isCouponValid(cart.coupon, subtotal);
+            if (!validation.valid) {
+                return res.status(400).json({ success: false, message: validation.message });
+            }
+            discountAmount = calculateCouponDiscount(cart.coupon, subtotal);
+            couponCode = cart.coupon.code;
+        }
+
+        const orderItems = cartItems.map((item) => ({
+            productId: item.productId,
+            itemId: item.productId,
+            variantId: item.variantId,
+            quantity: item.quantity,
+            mrp: item.variant.mrp,
+            sellingPrice: item.variant.sellingPrice,
+            total: Number(item.variant.sellingPrice) * item.quantity,
+            productName: item.product.title,
+            variantName: item.variant.name,
+            sku: item.variant.sku,
+            imageUrl: item.product.images?.[0] || null
+        }));
+
+        const created = await prisma.$transaction(async (tx) => {
+            const order = await tx.order.create({
+                data: {
+                    customer: { connect: { id: customer.id } },
+                    shopkeeper: { connect: { id: [...shopkeeperIds][0] } },
+                    paymentType,
+                    discountAmount,
+                    grandTotal: subtotal - discountAmount,
+                    couponCode,
+                    ...(cart.coupon ? { coupon: { connect: { id: cart.coupon.id } } } : {}),
+                    deliveryAddress: { connect: { id: addressId } },
+                    orderItems: { create: orderItems }
+                },
+                include: {
+                    orderItems: { include: { item: { select: { title: true, unit: true } }, variant: { select: { name: true, mrp: true, sellingPrice: true, sku: true } } } },
+                    deliveryAddress: { select: { city: true, state: true, pincode: true, flatnumber: true, latitude: true, longitude: true } }
+                }
+            });
+
+            if (cart.coupon) {
+                await tx.coupon.update({ where: { id: cart.coupon.id }, data: { usedCount: { increment: 1 } } });
+                await tx.couponUsage.create({ data: { couponId: cart.coupon.id, userId: customer.userid, orderId: order.id } });
+            }
+
+            await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
+            await tx.cart.update({ where: { id: cart.id }, data: { couponId: null } });
+
+            return order;
+        });
+
+        return res.json({ success: true, order: created });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, message: 'Internal Server Error' });
+    }
+});

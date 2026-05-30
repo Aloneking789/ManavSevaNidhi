@@ -305,6 +305,68 @@ curl http://localhost:3000/api/v1/owner/inventory/admin/products/ITEM_ID/variant
   -H "Authorization: Bearer YOUR_JWT"
 ```
 
+## 7. Coupons
+
+### POST `/coupons`
+Create a coupon.
+
+```bash
+curl -X POST http://localhost:3000/api/v1/owner/coupons \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "SAVE10",
+    "description": "10% off on orders above 500",
+    "discountType": "PERCENTAGE",
+    "discountValue": 10,
+    "minOrderAmount": 500,
+    "maxDiscountAmount": 100,
+    "usageLimit": 100,
+    "usageLimitPerUser": 1,
+    "isFirstOrder": true,
+    "isAppOnly": false,
+    "applicableOn": []
+  }'
+```
+
+### GET `/coupons`
+List coupons.
+
+```bash
+curl http://localhost:3000/api/v1/owner/coupons \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
+### GET `/coupons/:id`
+Get one coupon.
+
+```bash
+curl http://localhost:3000/api/v1/owner/coupons/COUPON_ID \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
+### PUT `/coupons/:id`
+Update a coupon.
+
+```bash
+curl -X PUT http://localhost:3000/api/v1/owner/coupons/COUPON_ID \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Updated coupon text",
+    "discountValue": 15,
+    "status": "ACTIVE"
+  }'
+```
+
+### DELETE `/coupons/:id`
+Delete a coupon.
+
+```bash
+curl -X DELETE http://localhost:3000/api/v1/owner/coupons/COUPON_ID \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
 ## Notes
 
 The inventory routes also expose `PATCH` actions for toggling product/variant active state and updating stock quantities. Those are available in the codebase, but this reference intentionally focuses on `GET`, `POST`, `PUT`, and `DELETE` for the sections requested.

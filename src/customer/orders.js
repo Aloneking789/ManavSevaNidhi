@@ -4,9 +4,16 @@ import { customerMiddleware } from "../../middlewares/customerAuth.js";
 
 export const customerOrdersRouter = Router();
 
+function isCouponApplicableToOrder(coupon, items) {
+    const applicableOn = Array.isArray(coupon?.applicableOn) ? coupon.applicableOn : [];
+    if (applicableOn.length === 0) return true;
+
+    return items.some((item) => applicableOn.includes(item.productId) || (item.categoryId && applicableOn.includes(item.categoryId)));
+}
+
 customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
     console.log(`Customer ${req.customerid} is placing an order with data:`, req.body);
-    const { items, paymentType, addressId } = req.body;
+    const { items, paymentType, addressId, couponCode, couponId } = req.body;
     if (!addressId) return res.status(400).json({ success: false, message: "addressId required" });
     if (!Array.isArray(items) || items.length === 0)
         return res.status(400).json({ success: false, message: "items required" });
@@ -16,7 +23,7 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
     try {
         const customer = await prisma.customer.findUnique({
             where: { id: req.customerid },
-            select: { id: true }
+            select: { id: true, userid: true }
         });
         if (!customer) return res.status(404).json({ success: false, message: "Customer not found" });
 
@@ -35,7 +42,8 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
                 id: true,
                 shopkeeperId: true,
                 title: true,
-                images: true
+                images: true,
+                categoryId: true
             }
         });
         if (dbItems.length !== itemIds.length)
@@ -46,6 +54,31 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
             return res.status(400).json({ success: false, message: "All items must belong to same shopkeeper" });
         const shopkeeperId = dbItems[0].shopkeeperId;
 
+        let coupon = null;
+        let discountAmount = 0;
+        let resolvedCouponCode = null;
+
+        if (couponCode || couponId) {
+            coupon = await prisma.coupon.findFirst({
+                where: couponId ? { id: couponId } : { code: couponCode }
+            });
+
+            if (!coupon) {
+                return res.status(400).json({ success: false, message: 'Coupon not found' });
+            }
+
+            const now = new Date();
+            if (coupon.status !== 'ACTIVE') {
+                return res.status(400).json({ success: false, message: 'Coupon is not active' });
+            }
+            if (coupon.startDate && coupon.startDate > now) {
+                return res.status(400).json({ success: false, message: 'Coupon is not active yet' });
+            }
+            if (coupon.endDate && coupon.endDate < now) {
+                return res.status(400).json({ success: false, message: 'Coupon has expired' });
+            }
+        }
+
         // Fetch any variants referenced by client
         const variantIds = [...new Set(items.map(i => i.variantId).filter(Boolean))];
         const dbVariants = variantIds.length ? await prisma.productVariant.findMany({ where: { id: { in: variantIds } }, select: { id: true, mrp: true, sellingPrice: true, productId: true, name: true, sku: true, stockQty: true, product: { select: { id: true, title: true, images: true } } } }) : [];
@@ -53,6 +86,7 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
 
         let total = 0;
         const orderItemsData = [];
+        let couponConnect = null;
         for (const reqItem of items) {
             const dbItem = dbItems.find(i => i.id === reqItem.itemId);
             const quantity = parseInt(reqItem.quantity, 10);
@@ -84,7 +118,6 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
                 quantity,
                 mrp,
                 sellingPrice: unitPrice,
-                lineTotal,
                 total: lineTotal,
                 variantId: reqItem.variantId,
                 productName: dbItem.title,
@@ -94,19 +127,68 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
             });
         }
 
-        const created = await prisma.order.create({
-            data: {
-                customerId: customer.id,
-                shopkeeperId,
-                paymentType,
-                grandTotal: total,
-                deliveryAddressId: addressId,
-                orderItems: { create: orderItemsData }
-            },
-            include: {
-                orderItems: { include: { item: { select: { title: true, unit: true } }, variant: { select: { name: true, mrp: true, sellingPrice: true, sku: true } } } },
-                deliveryAddress: { select: { city: true, state: true, pincode: true, flatnumber: true, latitude: true, longitude: true } }
+        if (coupon) {
+            if (coupon.isFirstOrder) {
+                const orderCount = await prisma.order.count({ where: { customerId: customer.id } });
+                if (orderCount > 0) {
+                    return res.status(400).json({ success: false, message: 'Coupon is only valid on the first order' });
+                }
             }
+
+            if (!isCouponApplicableToOrder(coupon, dbItems)) {
+                return res.status(400).json({ success: false, message: 'Coupon does not apply to these products' });
+            }
+
+            const userUsageCount = await prisma.couponUsage.count({
+                where: { couponId: coupon.id, userId: customer.userid }
+            });
+            if (coupon.usageLimitPerUser !== null && coupon.usageLimitPerUser !== undefined && userUsageCount >= coupon.usageLimitPerUser) {
+                return res.status(400).json({ success: false, message: 'Coupon usage limit per user reached' });
+            }
+
+            if (coupon.minOrderAmount && total < Number(coupon.minOrderAmount)) {
+                return res.status(400).json({ success: false, message: 'Order amount is below coupon minimum' });
+            }
+
+            if (coupon.discountType === 'PERCENTAGE') {
+                discountAmount = (total * Number(coupon.discountValue)) / 100;
+                if (coupon.maxDiscountAmount !== null && coupon.maxDiscountAmount !== undefined) {
+                    discountAmount = Math.min(discountAmount, Number(coupon.maxDiscountAmount));
+                }
+            } else if (coupon.discountType === 'FLAT') {
+                discountAmount = Number(coupon.discountValue);
+            }
+
+            discountAmount = Math.max(0, Math.min(discountAmount, total));
+            resolvedCouponCode = coupon.code;
+            couponConnect = { connect: { id: coupon.id } };
+        }
+
+        const created = await prisma.$transaction(async (tx) => {
+            const order = await tx.order.create({
+                data: {
+                    customer: { connect: { id: customer.id } },
+                    shopkeeper: { connect: { id: shopkeeperId } },
+                    paymentType,
+                    discountAmount,
+                    grandTotal: total - discountAmount,
+                    couponCode: resolvedCouponCode,
+                    ...(couponConnect ? { coupon: couponConnect } : {}),
+                    deliveryAddress: { connect: { id: addressId } },
+                    orderItems: { create: orderItemsData }
+                },
+                include: {
+                    orderItems: { include: { item: { select: { title: true, unit: true } }, variant: { select: { name: true, mrp: true, sellingPrice: true, sku: true } } } },
+                    deliveryAddress: { select: { city: true, state: true, pincode: true, flatnumber: true, latitude: true, longitude: true } }
+                }
+            });
+
+            if (coupon) {
+                await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
+                await tx.couponUsage.create({ data: { couponId: coupon.id, userId: customer.userid, orderId: order.id } });
+            }
+
+            return order;
         });
 
         return res.json({ success: true, order: created });
@@ -127,7 +209,8 @@ customerOrdersRouter.get('/', customerMiddleware, async (req, res) => {
             include: {
                 orderItems: {
                     include: {
-                        item: { select: { title: true, images: true } }
+                        item: { select: { title: true, images: true } },
+                        variant: { select: { name: true, mrp: true, sellingPrice: true, sku: true } }
                     }
                 },
                 shopkeeper: { select: { shopname: true } },
@@ -190,6 +273,11 @@ customerOrdersRouter.put('/:id/cancel', customerMiddleware, async (req, res) => 
     console.log(`Customer ${req.customerid} requested cancellation for order ${req.params.id}`);
     console.log(`Request body:`, req.body);
     try {
+        const { cancelReason } = req.body;
+        if (!cancelReason || !String(cancelReason).trim()) {
+            return res.status(400).json({ success: false, message: "cancelReason is required" });
+        }
+
         const order = await prisma.order.findFirst({
             where: { id: req.params.id, customerId: req.customerid }
         });
@@ -202,7 +290,11 @@ customerOrdersRouter.put('/:id/cancel', customerMiddleware, async (req, res) => 
 
         await prisma.order.update({
             where: { id: req.params.id },
-            data: { status: 'CANCELLED' }
+            data: {
+                status: 'CANCELLED',
+                cancelledAt: new Date(),
+                cancelReason: String(cancelReason).trim()
+            }
         });
 
         res.json({ success: true, message: "Order cancelled successfully" });

@@ -180,7 +180,7 @@ model Coupon {
   minOrderAmount    Decimal?     @db.Decimal(10, 2)
   maxDiscountAmount Decimal?     @db.Decimal(10, 2) // cap for % coupons
   usageLimit        Int? // total times usable
-  usageLimitPerUser Int?
+  usageLimitPerUser Int?         @default(1)
   usedCount         Int          @default(0)
   status            CouponStatus @default(ACTIVE)
   isFirstOrder      Boolean      @default(false)
