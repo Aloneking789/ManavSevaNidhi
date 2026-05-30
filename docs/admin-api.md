@@ -205,6 +205,52 @@ curl -X DELETE http://localhost:3000/api/v1/owner/inventory/products/ITEM_ID \
   -H "Authorization: Bearer YOUR_JWT"
 ```
 
+### POST `/inventory/item/:id/images`
+Append more images to an existing product later.
+
+```bash
+curl -X POST http://localhost:3000/api/v1/owner/inventory/item/ITEM_ID/images \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -F "images=@./extra-1.jpg" \
+  -F "images=@./extra-2.jpg"
+```
+
+### POST `/inventory/shop-image`
+Add a shop image for the current shopkeeper.
+
+```bash
+curl -X POST http://localhost:3000/api/v1/owner/inventory/shop-image \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -F "description=Storefront" \
+  -F "image=@./storefront.jpg"
+```
+
+### GET `/inventory/shop-images`
+List the current shopkeeper’s uploaded shop images.
+
+```bash
+curl http://localhost:3000/api/v1/owner/inventory/shop-images \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
+### POST `/inventory/offer`
+Create an offer with optional image and banner uploads.
+
+```bash
+curl -X POST http://localhost:3000/api/v1/owner/inventory/offer \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -F "title=Summer Sale" \
+  -F "description=Flat discount on selected products" \
+  -F "discountType=FLAT" \
+  -F "discountValue=50" \
+  -F "minQty=1" \
+  -F "image=@./offer.jpg" \
+  -F "banner=@./offer-banner.jpg" \
+  -F 'applicableProductIds=["PRODUCT_ID"]'
+```
+
+Public offer browsing is exposed at `GET /api/v1/user/inventory/offers`.
+
 ## 5. Variants
 
 ### GET `/inventory/products/:id/variants`
@@ -428,6 +474,12 @@ Reject an order while it is still `PROCESSING`.
 curl -X PATCH http://localhost:3000/api/v1/owner/orders/ORDER_ID/reject \
   -H "Authorization: Bearer YOUR_JWT"
 ```
+
+## 9. Inventory Media Notes
+
+The item create/update endpoints already accept `images` uploads. The new `POST /inventory/item/:id/images` route is for appending more product images later without replacing the existing gallery.
+
+Shop images live in the `ShopkeeperImage` model and can be created, listed, updated, and deleted through the inventory routes.
 
 ## Notes
 

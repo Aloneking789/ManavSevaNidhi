@@ -89,6 +89,122 @@ customerInventoryRouter.get('/shop-Images', async (req, res) => {
     }
 });
 
+customerInventoryRouter.get('/offers', async (req, res) => {
+    try {
+        const now = new Date();
+        const offers = await prisma.offer.findMany({
+            where: {
+                isActive: true,
+                startDate: { lte: now },
+                OR: [
+                    { endDate: null },
+                    { endDate: { gte: now } }
+                ]
+            },
+            select: {
+                id: true,
+                title: true,
+                description: true,
+                imageUrl: true,
+                bannerUrl: true,
+                discountType: true,
+                discountValue: true,
+                minQty: true,
+                buyQty: true,
+                getQty: true,
+                startDate: true,
+                endDate: true,
+                applicableProductIds: true,
+                applicableCategoryIds: true,
+                createdAt: true
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        res.status(200).json({ success: true, offers });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: "Something went wrong" });
+    }
+});
+
+customerInventoryRouter.get('/banners', async (req, res) => {
+    try {
+        const now = new Date();
+
+        const [offers, categories] = await Promise.all([
+            prisma.offer.findMany({
+                where: {
+                    isActive: true,
+                    startDate: { lte: now },
+                    OR: [
+                        { endDate: null },
+                        { endDate: { gte: now } }
+                    ]
+                },
+                select: {
+                    id: true,
+                    title: true,
+                    description: true,
+                    imageUrl: true,
+                    bannerUrl: true,
+                    discountType: true,
+                    discountValue: true,
+                    createdAt: true
+                },
+                orderBy: { createdAt: 'desc' }
+            }),
+            prisma.category.findMany({
+                where: {
+                    isActive: true,
+                    bannerUrl: { not: null }
+                },
+                select: {
+                    id: true,
+                    title: true,
+                    slug: true,
+                    imageUrl: true,
+                    bannerUrl: true,
+                    parentId: true,
+                    sortOrder: true,
+                    createdAt: true
+                },
+                orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }]
+            })
+        ]);
+
+        const banners = [
+            ...offers.map((offer) => ({
+                type: 'offer',
+                id: offer.id,
+                title: offer.title,
+                description: offer.description,
+                imageUrl: offer.imageUrl,
+                bannerUrl: offer.bannerUrl,
+                discountType: offer.discountType,
+                discountValue: offer.discountValue,
+                createdAt: offer.createdAt
+            })),
+            ...categories.map((category) => ({
+                type: 'category',
+                id: category.id,
+                title: category.title,
+                slug: category.slug,
+                imageUrl: category.imageUrl,
+                bannerUrl: category.bannerUrl,
+                parentId: category.parentId,
+                sortOrder: category.sortOrder,
+                createdAt: category.createdAt
+            }))
+        ];
+
+        res.status(200).json({ success: true, banners });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: "Something went wrong" });
+    }
+});
+
 
 customerInventoryRouter.get('/item/:id', (req, res, next) => {
     if (req.headers.authorization) {

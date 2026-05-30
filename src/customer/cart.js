@@ -122,6 +122,29 @@ customerCartRouter.get('/', customerMiddleware, async (req, res) => {
     }
 });
 
+customerCartRouter.get('/summary', customerMiddleware, async (req, res) => {
+    try {
+        const cart = await loadCart(req.customerid);
+        const shaped = shapeCart(cart);
+        const discount = calculateCouponDiscount(cart?.coupon, shaped.subtotal);
+
+        return res.json({
+            success: true,
+            summary: {
+                cartId: shaped.id,
+                itemCount: shaped.itemCount,
+                subtotal: shaped.subtotal,
+                discount,
+                total: shaped.subtotal - discount,
+                coupon: shaped.coupon
+            }
+        });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, message: 'Something went wrong' });
+    }
+});
+
 customerCartRouter.post('/items', customerMiddleware, async (req, res) => {
     const { itemId, variantId, quantity = 1 } = req.body;
     if (!itemId || !variantId) {

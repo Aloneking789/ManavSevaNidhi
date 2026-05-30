@@ -157,6 +157,31 @@ model Cart {
   items CartItem[]
 }
 
+model Wishlist {
+  id        String         @id @default(cuid())
+  userId    String         @unique
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  items     WishlistItem[]
+}
+
+model WishlistItem {
+  id         String   @id @default(cuid())
+  wishlistId String
+  wishlist   Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Item     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id])
+  createdAt  DateTime @default(now())
+
+  @@unique([wishlistId, productId])
+  @@index([wishlistId])
+  @@index([productId])
+}
+
 enum DiscountType {
   PERCENTAGE
   FLAT
@@ -264,6 +289,7 @@ model Item {
   addons           String[]
   concerns         ProductConcern[]
   variants         ProductVariant[]
+  wishlistItems    WishlistItem[]
   shopkeeper       Shopkeeper       @relation(fields: [shopkeeperId], references: [id])
   shopkeeperId     String
   category         Category         @relation(fields: [categoryId], references: [id])
@@ -379,6 +405,7 @@ model ProductVariant {
   orderItems    OrderItem[]
   cartItems     CartItem[]
   inventoryLogs InventoryLog[]
+  wishlistItems WishlistItem[]
 
   @@index([productId])
   @@index([sku])
@@ -445,6 +472,7 @@ model User {
   avatar       String?
   profileimage String
   cart         Cart?
+  wishlist     Wishlist?
   customer     Customer?
   shopkeeper   Shopkeeper?
   couponUsages CouponUsage[]

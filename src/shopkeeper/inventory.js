@@ -357,6 +357,33 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.array('images', 5), a
     }
 });
 
+// Append images to an existing item later
+inventoryRouter.post('/item/:id/images', shopkeeperMiddleware, upload.array('images', 5), async (req, res) => {
+    const { id } = req.params;
+    try {
+        const shopkeeperid = await req.shopkeeperid;
+        const item = await prisma.item.findUnique({ where: { id } });
+        if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
+        if (item.shopkeeperId !== shopkeeperid) return res.status(403).json({ success: false, message: 'Not authorized to update this item' });
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ success: false, message: 'At least one image file is required' });
+        }
+
+        const uploadedImages = await uploadImageBuffers(req.files);
+        const nextImages = Array.from(new Set([...(item.images || []), ...uploadedImages]));
+
+        const updated = await prisma.item.update({
+            where: { id },
+            data: { images: nextImages }
+        });
+
+        res.status(200).json({ success: true, item: updated });
+    } catch (err) {
+        console.error('Append item images error', err);
+        res.status(500).json({ success: false, message: 'Something went wrong' });
+    }
+});
+
 // Shopkeeper images CRUD (ShopkeeperImage model)
 inventoryRouter.post('/shop-image', shopkeeperMiddleware, upload.single('image'), async (req, res) => {
     const { description } = req.body;
@@ -377,6 +404,59 @@ inventoryRouter.post('/shop-image', shopkeeperMiddleware, upload.single('image')
     } catch (err) {
         console.error(err);
         res.status(500).json({ success: false, message: "Something went wrong" });
+    }
+});
+
+inventoryRouter.post('/offer', shopkeeperMiddleware, upload.fields([{ name: 'image' }, { name: 'banner' }]), async (req, res) => {
+    try {
+        const files = req.files || {};
+        const {
+            title,
+            description,
+            discountType,
+            discountValue,
+            minQty,
+            buyQty,
+            getQty,
+            isActive,
+            startDate,
+            endDate,
+            applicableProductIds,
+            applicableCategoryIds
+        } = req.body;
+
+        if (!title || !discountType || discountValue === undefined) {
+            return res.status(400).json({ success: false, message: 'title, discountType and discountValue are required' });
+        }
+
+        let imageUrl = null;
+        let bannerUrl = null;
+        if (files.image && files.image[0]) imageUrl = await uploadImageBuffer(files.image[0].buffer);
+        if (files.banner && files.banner[0]) bannerUrl = await uploadImageBuffer(files.banner[0].buffer);
+
+        const offer = await prisma.offer.create({
+            data: {
+                title,
+                description: description || null,
+                discountType,
+                discountValue: Number(discountValue),
+                minQty: minQty !== undefined && minQty !== '' ? Number.parseInt(minQty, 10) : null,
+                buyQty: buyQty !== undefined && buyQty !== '' ? Number.parseInt(buyQty, 10) : null,
+                getQty: getQty !== undefined && getQty !== '' ? Number.parseInt(getQty, 10) : null,
+                isActive: isActive !== undefined ? String(isActive) === 'true' : true,
+                startDate: startDate ? new Date(startDate) : undefined,
+                endDate: endDate ? new Date(endDate) : null,
+                imageUrl,
+                bannerUrl,
+                applicableProductIds: applicableProductIds ? (typeof applicableProductIds === 'string' ? JSON.parse(applicableProductIds) : applicableProductIds) : [],
+                applicableCategoryIds: applicableCategoryIds ? (typeof applicableCategoryIds === 'string' ? JSON.parse(applicableCategoryIds) : applicableCategoryIds) : []
+            }
+        });
+
+        res.status(201).json({ success: true, offer });
+    } catch (err) {
+        console.error('Create offer error', err);
+        res.status(500).json({ success: false, message: 'Something went wrong' });
     }
 });
 

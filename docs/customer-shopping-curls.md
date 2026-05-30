@@ -6,10 +6,16 @@ This guide covers the user flow currently supported by the server:
 - browse products and variants
 - add a delivery address if needed
 - add items to cart
+- view cart summary
 - apply and remove coupons
+- save wishlist items and move them into cart
 - checkout the cart
 - place a direct order
 - place one order with multiple items
+- write a product review
+- read public product reviews
+- read public banners
+- view public offers
 
 Important: cart endpoints are available under `/api/v1/user/cart`.
 
@@ -120,7 +126,47 @@ curl -X DELETE http://localhost:3000/api/v1/user/cart/clear \
   -H "Authorization: Bearer CUSTOMER_JWT"
 ```
 
-## 6. Apply coupon to cart
+### Cart summary
+
+```bash
+curl http://localhost:3000/api/v1/user/cart/summary \
+  -H "Authorization: Bearer CUSTOMER_JWT"
+```
+
+## 6. Wishlist
+
+### View wishlist
+
+```bash
+curl http://localhost:3000/api/v1/user/wishlist \
+  -H "Authorization: Bearer CUSTOMER_JWT"
+```
+
+### Add to wishlist
+
+```bash
+curl -X POST http://localhost:3000/api/v1/user/wishlist \
+  -H "Authorization: Bearer CUSTOMER_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productId": "ITEM_ID",
+    "variantId": "VARIANT_ID"
+  }'
+```
+
+### Move wishlist item to cart
+
+```bash
+curl -X POST http://localhost:3000/api/v1/user/wishlist/move-to-cart \
+  -H "Authorization: Bearer CUSTOMER_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "wishlistItemId": "WISHLIST_ITEM_ID",
+    "quantity": 1
+  }'
+```
+
+## 7. Apply coupon to cart
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/user/cart/coupon/apply \
@@ -136,7 +182,7 @@ curl -X DELETE http://localhost:3000/api/v1/user/cart/coupon \
   -H "Authorization: Bearer CUSTOMER_JWT"
 ```
 
-## 7. Checkout cart
+## 8. Checkout cart
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/user/cart/checkout \
@@ -148,7 +194,7 @@ curl -X POST http://localhost:3000/api/v1/user/cart/checkout \
   }'
 ```
 
-## 8. Direct purchase of one item
+## 9. Direct purchase of one item
 
 Use this when the user wants to buy a single product immediately.
 
@@ -169,7 +215,7 @@ curl -X POST http://localhost:3000/api/v1/user/orders \
   }'
 ```
 
-## 9. Direct multi-item purchase
+## 10. Direct multi-item purchase
 
 Use this if you want to skip cart persistence and purchase a set of items in one request.
 
@@ -202,25 +248,60 @@ Rules enforced by the API:
 - the variant must have enough stock
 - `paymentType` must be `COD` or `CASH`
 
-## 10. View orders
+## 11. View orders
 
 ```bash
 curl http://localhost:3000/api/v1/user/orders \
   -H "Authorization: Bearer CUSTOMER_JWT"
 ```
 
-## 11. View one order
+## 12. View one order
 
 ```bash
 curl http://localhost:3000/api/v1/user/orders/ORDER_ID \
   -H "Authorization: Bearer CUSTOMER_JWT"
 ```
 
-## 12. Cancel an order
+## 13. Cancel an order
 
 ```bash
 curl -X PUT http://localhost:3000/api/v1/user/orders/ORDER_ID/cancel \
   -H "Authorization: Bearer CUSTOMER_JWT"
+```
+
+## 14. Reviews and offers
+
+### Submit a review
+
+```bash
+curl -X POST http://localhost:3000/api/v1/user/reviews \
+  -H "Authorization: Bearer CUSTOMER_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productId": "ITEM_ID",
+    "rating": 5,
+    "description": "Good product",
+    "title": "Recommended",
+    "orderId": "ORDER_ID"
+  }'
+```
+
+### View public reviews
+
+```bash
+curl http://localhost:3000/api/v1/user/reviews
+```
+
+### View public offers
+
+```bash
+curl http://localhost:3000/api/v1/user/inventory/offers
+```
+
+### View public banners
+
+```bash
+curl http://localhost:3000/api/v1/user/inventory/banners
 ```
 
 ## Suggested client flow

@@ -87,6 +87,8 @@ curl http://localhost:3000/api/v1/user/inventory/item/ITEM_ID \
 
 Pick the `variantId` you want to order. The order endpoint expects each item line to include a `variantId`.
 
+You can also view public banners at `GET /inventory/banners`, public offers at `GET /inventory/offers`, and public reviews at `GET /reviews`.
+
 ## 5. Create the order
 
 ### POST `/orders`
@@ -121,6 +123,8 @@ curl -X POST http://localhost:3000/api/v1/user/orders \
 
 The response returns the created order with item snapshots and the delivery address.
 
+If you already have items in cart, you can skip this and use cart checkout instead.
+
 ## 6. Checkout from cart
 
 ```bash
@@ -132,6 +136,8 @@ curl -X POST http://localhost:3000/api/v1/user/cart/checkout \
     "paymentType": "COD"
   }'
 ```
+
+For a quick order summary before checkout, use `GET /cart/summary`.
 
 ## 7. View orders
 
@@ -151,7 +157,75 @@ curl http://localhost:3000/api/v1/user/orders/ORDER_ID \
   -H "Authorization: Bearer YOUR_CUSTOMER_JWT"
 ```
 
-## 8. Cancel an order
+## 8. Wishlist
+
+### GET `/wishlist`
+Show saved wishlist items.
+
+```bash
+curl http://localhost:3000/api/v1/user/wishlist \
+  -H "Authorization: Bearer YOUR_CUSTOMER_JWT"
+```
+
+### POST `/wishlist`
+Add a product to wishlist.
+
+```bash
+curl -X POST http://localhost:3000/api/v1/user/wishlist \
+  -H "Authorization: Bearer YOUR_CUSTOMER_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productId": "ITEM_ID",
+    "variantId": "VARIANT_ID"
+  }'
+```
+
+### POST `/wishlist/move-to-cart`
+Move one wishlist item into the cart.
+
+```bash
+curl -X POST http://localhost:3000/api/v1/user/wishlist/move-to-cart \
+  -H "Authorization: Bearer YOUR_CUSTOMER_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "wishlistItemId": "WISHLIST_ITEM_ID",
+    "quantity": 1
+  }'
+```
+
+## 9. Reviews
+
+### POST `/reviews`
+Create a product review with 1 to 5 stars and a description.
+
+```bash
+curl -X POST http://localhost:3000/api/v1/user/reviews \
+  -H "Authorization: Bearer YOUR_CUSTOMER_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productId": "ITEM_ID",
+    "rating": 5,
+    "description": "Great quality and fast delivery",
+    "title": "Worth it",
+    "orderId": "ORDER_ID"
+  }'
+```
+
+### GET `/reviews`
+Public endpoint for all approved reviews.
+
+```bash
+curl http://localhost:3000/api/v1/user/reviews
+```
+
+### GET `/reviews?productId=...`
+Filter reviews for one product.
+
+```bash
+curl "http://localhost:3000/api/v1/user/reviews?productId=ITEM_ID"
+```
+
+## 10. Cancel an order
 
 ### PUT `/orders/:id/cancel`
 Cancel an order if it has not reached a non-cancellable state.
@@ -174,5 +248,6 @@ The API now requires `cancelReason` and stores it with the cancellation timestam
 3. Browse products and open the product details page.
 4. Choose a variant for each product.
 5. Add items to cart and optionally apply a coupon.
-6. Checkout the cart with `addressId` and `paymentType`, or submit a direct order with `items`.
-7. Show the order history page using `GET /orders`.
+6. Optionally save items to wishlist, then move them to cart when ready.
+7. Checkout the cart with `addressId` and `paymentType`, or submit a direct order with `items`.
+8. Show the order history page using `GET /orders`.
