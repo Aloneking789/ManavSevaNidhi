@@ -21,22 +21,37 @@ const publicCategorySelect = {
 };
 
 const publicItemSelect = {
+
     id: true,
+
     title: true,
+
     slug: true,
+
     images: true,
+
     availability: true,
+
     unit: true,
+
     shortDescription: true,
+
     description: true,
+
     warranty: true,
+
     addons: true,
+
     tags: true,
-    minimumpurchase: true,
+
     isFeatured: true,
+
     isBestSeller: true,
+
     createdAt: true,
+
     categoryId: true,
+
     category: {
         select: {
             id: true,
@@ -46,29 +61,126 @@ const publicItemSelect = {
             bannerUrl: true,
             parentId: true
         }
+    },
+
+    // ONLY REQUIRED FOR PRICE CALCULATION
+
+    variants: {
+
+        where: {
+            isActive: true
+        },
+
+        select: {
+            sellingPrice: true,
+            mrp: true
+        }
     }
 };
 
-customerInventoryRouter.get('/items', (req, res, next) => {
-    if (req.headers.authorization) {
-        return customerMiddleware(req, res, next);
-    }
-    next();
-}, async (req, res) => {
-    try {
 
-        let customer = null;
+customerInventoryRouter.get(
+    '/items',
 
-        const items = await prisma.item.findMany({
-            where: { isActive: true },
-            select: publicItemSelect
-        });
-        res.status(200).json({ success: true, items });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, message: "Something went wrong" });
+    (req, res, next) => {
+
+        if (req.headers.authorization) {
+            return customerMiddleware(
+                req,
+                res,
+                next
+            );
+        }
+
+        next();
+
+    },
+
+    async (req, res) => {
+
+        try {
+
+            const items =
+                await prisma.item.findMany({
+
+                    where: {
+                        isActive: true
+                    },
+
+                    select: publicItemSelect
+                });
+
+            const formattedItems =
+                items.map((item) => {
+
+                    const prices =
+                        item.variants.map(
+                            (variant) =>
+                                Number(
+                                    variant.sellingPrice
+                                )
+                        );
+
+                    const mrps =
+                        item.variants.map(
+                            (variant) =>
+                                Number(variant.mrp)
+                        );
+
+                    const startingPrice =
+                        prices.length > 0
+                            ? Math.min(...prices)
+                            : null;
+
+                    const maxPrice =
+                        prices.length > 0
+                            ? Math.max(...prices)
+                            : null;
+
+                    const startingMrp =
+                        mrps.length > 0
+                            ? Math.min(...mrps)
+                            : null;
+
+                    const maxMrp =
+                        mrps.length > 0
+                            ? Math.max(...mrps)
+                            : null;
+
+                    // REMOVE VARIANTS FROM RESPONSE
+                    delete item.variants;
+
+                    return {
+
+                        ...item,
+
+                        startingPrice,
+
+                        maxPrice,
+
+                        startingMrp,
+
+                        maxMrp
+                    };
+                });
+
+            return res.status(200).json({
+                success: true,
+                items: formattedItems
+            });
+
+        } catch (err) {
+
+            console.error(err);
+
+            return res.status(500).json({
+                success: false,
+                message: "Something went wrong"
+            });
+
+        }
     }
-});
+);
 
 customerInventoryRouter.get('/shop-Images', async (req, res) => {
     try {
@@ -205,76 +317,208 @@ customerInventoryRouter.get('/banners', async (req, res) => {
 });
 
 
-customerInventoryRouter.get('/item/:id', (req, res, next) => {
-    if (req.headers.authorization) {
-        return customerMiddleware(req, res, next);
-    }
-    next();
-}, async (req, res) => {
-    const { id } = req.params;
-    try {
+// customerInventoryRouter.get('/item/:id', (req, res, next) => {
+//     if (req.headers.authorization) {
+//         return customerMiddleware(req, res, next);
+//     }
+//     next();
+// }, async (req, res) => {
+//     const { id } = req.params;
+//     try {
 
-        let customer = null;
+//         let customer = null;
 
-        const item = await prisma.item.findFirst({
-            where: { id, isActive: true },
-            include: {
-                variants: {
-                    select: {
-                        id: true,
-                        name: true,
-                        sku: true,
-                        mrp: true,
-                        sellingPrice: true,
-                        costPrice: true,
-                        weight: true,
-                        volume: true,
-                        stockQty: true,
-                        lowStockAlert: true,
-                        isDefault: true,
-                        isActive: true,
-                        sortOrder: true
-                    }
-                },
-                shopkeeper: {
-                    select: {
-                        shopname: true,
-                        shopaddress: {
+//         const item = await prisma.item.findFirst({
+//             where: { id, isActive: true },
+//             include: {
+//                 variants: {
+//                     select: {
+//                         id: true,
+//                         name: true,
+//                         sku: true,
+//                         mrp: true,
+//                         sellingPrice: true,
+//                         costPrice: true,
+//                         weight: true,
+//                         volume: true,
+//                         lowStockAlert: true,
+//                         isDefault: true,
+//                         isActive: true,
+//                         sortOrder: true,
+//                         reviews: {
+//                             where : {
+//                                 status : "APPROVED"
+//                             },
+//                             select: {
+//                                 rating: true,
+//                                 body: true,
+//                                 user: {
+//                                     select: {
+//                                         name: true
+//                                     }
+//                                 }
+//                             }
+//                         }
+//                     }
+//                 },
+//                 category: {
+//                     select: {
+//                         id: true,
+//                         title: true,
+//                         slug: true,
+//                         description: true,
+//                         imageUrl: true,
+//                         bannerUrl: true,
+//                         parentId: true,
+//                         isActive: true,
+//                         sortOrder: true,
+//                         metaTitle: true,
+//                         metaDesc: true,
+//                         createdAt: true
+//                     }
+//                 }
+//             }
+//         });
+//         if (!item) return res.status(404).json({ success: false, message: "Item not found" });
+//         res.status(200).json({ success: true, item });
+//     } catch (err) {
+//         console.error(err);
+//         res.status(500).json({ success: false, message: "Something went wrong" });
+//     }
+// });
+customerInventoryRouter.get(
+    '/item/:id',
+
+    (req, res, next) => {
+
+        if (req.headers.authorization) {
+            return customerMiddleware(req, res, next);
+        }
+
+        next();
+
+    },
+
+    async (req, res) => {
+
+        const { id } = req.params;
+
+        try {
+
+            const item =
+                await prisma.item.findFirst({
+
+                    where: {
+                        id,
+                        isActive: true
+                    },
+
+                    include: {
+
+                        variants: {
+
+                            include: {
+
+                                reviews: {
+
+                                    where: {
+                                        status: 'APPROVED'
+                                    },
+
+                                    select: {
+
+                                        rating: true,
+
+                                        body: true,
+
+                                        user: {
+                                            select: {
+                                                name: true
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+
+                        category: {
                             select: {
-                                city: true,
-                                state: true,
-                                pincode: true,
-                                flatnumber: true
+                                id: true,
+                                title: true,
+                                slug: true,
+                                description: true,
+                                imageUrl: true,
+                                bannerUrl: true,
+                                parentId: true,
+                                isActive: true,
+                                sortOrder: true,
+                                metaTitle: true,
+                                metaDesc: true,
+                                createdAt: true
                             }
                         }
                     }
-                },
-                category: {
-                    select: {
-                        id: true,
-                        title: true,
-                        slug: true,
-                        description: true,
-                        imageUrl: true,
-                        bannerUrl: true,
-                        parentId: true,
-                        isActive: true,
-                        sortOrder: true,
-                        metaTitle: true,
-                        metaDesc: true,
-                        createdAt: true
-                    }
-                }
-            }
-        });
-        if (!item) return res.status(404).json({ success: false, message: "Item not found" });
-        res.status(200).json({ success: true, item });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, message: "Something went wrong" });
-    }
-});
+                });
 
+            if (!item) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Item not found"
+                });
+            }
+
+            // =========================
+            // VARIANT AVG RATING
+            // =========================
+
+            item.variants = item.variants.map(
+                (variant) => {
+
+                    const totalReviews =
+                        variant.reviews.length;
+
+                    const averageRating =
+                        totalReviews > 0
+                            ? Number(
+                                (
+                                    variant.reviews.reduce(
+                                        (sum, review) =>
+                                            sum +
+                                            review.rating,
+                                        0
+                                    ) / totalReviews
+                                ).toFixed(1)
+                            )
+                            : null;
+
+                    return {
+
+                        ...variant,
+
+                        averageRating,
+
+                        totalReviews
+                    };
+                }
+            );
+
+            return res.status(200).json({
+                success: true,
+                item
+            });
+
+        } catch (err) {
+
+            console.error(err);
+
+            return res.status(500).json({
+                success: false,
+                message: "Something went wrong"
+            });
+
+        }
+    }
+);
 
 
 customerInventoryRouter.get('/categories', (req, res, next) => {

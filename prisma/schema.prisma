@@ -110,8 +110,6 @@ enum ReturnReason {
 
 model Review {
   id           String       @id @default(cuid())
-  productId    String
-  product      Item         @relation(fields: [productId], references: [id], onDelete: Cascade)
   userId       String
   user         User         @relation(fields: [userId], references: [id])
   orderId      String?
@@ -125,8 +123,15 @@ model Review {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
-  @@unique([productId, userId, orderId])
+  productId String?
+  product   Item?   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, userId, orderId])
   @@index([productId])
+  @@index([variantId])
   @@index([userId])
 }
 
@@ -402,11 +407,13 @@ model ProductVariant {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   isAddedtoCart Boolean  @default(false)
+  attributes    Json?
 
   orderItems    OrderItem[]
   cartItems     CartItem[]
   inventoryLogs InventoryLog[]
   wishlistItems WishlistItem[]
+  reviews       Review[]
 
   @@index([productId])
   @@index([sku])

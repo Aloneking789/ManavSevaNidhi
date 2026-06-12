@@ -2,6 +2,8 @@ import { Router } from "express";
 import { prisma } from '../../config/prismaConfig.js';
 import { customerMiddleware } from "../../middlewares/customerAuth.js";
 import Razorpay from "razorpay";
+import crypto from "crypto"
+
 export const customerCartRouter = Router();
 
 const razorpayInstance = new Razorpay({
@@ -9,6 +11,125 @@ const razorpayInstance = new Razorpay({
     key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
+
+async function createOrderFromCart({
+    customerId,
+    addressId,
+    paymentType,
+    cart,
+    subtotal,
+    discountAmount,
+    paymentData = null
+}) {
+
+    const customer = await prisma.customer.findUnique({
+        where: { id: customerId },
+        select: {
+            id: true,
+            userid: true
+        }
+    });
+
+    const cartItems = cart.items;
+
+    const shopkeeperIds = new Set(
+        cartItems.map(
+            (item) => item.product.shopkeeperId
+        )
+    );
+
+    const orderItems = cartItems.map((item) => ({
+        productId: item.productId,
+        itemId: item.productId,
+        variantId: item.variantId,
+        quantity: item.quantity,
+        mrp: item.variant.mrp,
+        sellingPrice: item.variant.sellingPrice,
+        total:
+            Number(item.variant.sellingPrice) *
+            item.quantity,
+        productName: item.product.title,
+        variantName: item.variant.name,
+        sku: item.variant.sku,
+        imageUrl: item.product.images?.[0] || null
+    }));
+
+    return prisma.$transaction(async (tx) => {
+
+        const order = await tx.order.create({
+            data: {
+                customer: {
+                    connect: { id: customer.id }
+                },
+
+                shopkeeper: {
+                    connect: {
+                        id: [...shopkeeperIds][0]
+                    }
+                },
+
+                paymentType,
+
+                discountAmount,
+
+                grandTotal: subtotal - discountAmount,
+
+                deliveryAddress: {
+                    connect: { id: addressId }
+                },
+
+                orderItems: {
+                    create: orderItems
+                }
+            },
+
+            include: {
+                orderItems: true
+            }
+        });
+
+        // Create payment row for ONLINE
+        if (paymentData) {
+
+            await tx.payment.create({
+                data: {
+                    orderId: order.id,
+                    method: 'UPI',
+                    status: 'CAPTURED',
+                    amount: subtotal - discountAmount,
+
+                    gatewayOrderId:
+                        paymentData.razorpay_order_id,
+
+                    gatewayPaymentId:
+                        paymentData.razorpay_payment_id,
+
+                    gatewaySignature:
+                        paymentData.razorpay_signature,
+
+                    gatewayResponse: paymentData,
+
+                    paidAt: new Date()
+                }
+            });
+
+        }
+
+        // clear cart
+        await tx.cartItem.deleteMany({
+            where: {
+                cartId: cart.id
+            }
+        });
+
+        await tx.cart.update({
+            where: { id: cart.id },
+            data: { couponId: null }
+        });
+
+        return order;
+    });
+}
 
 
 function isCouponApplicableToItems(coupon, items) {
@@ -372,7 +493,7 @@ customerCartRouter.delete('/coupon', customerMiddleware, async (req, res) => {
 customerCartRouter.post('/checkout', customerMiddleware, async (req, res) => {
     const { addressId, paymentType } = req.body;
     if (!addressId) return res.status(400).json({ success: false, message: 'addressId required' });
-    if (!paymentType || !['COD', 'CASH'].includes(paymentType)) {
+    if (!paymentType || !['COD', 'ONLINE'].includes(paymentType)) {
         return res.status(400).json({ success: false, message: 'invalid paymentType' });
     }
 
@@ -410,56 +531,25 @@ customerCartRouter.post('/checkout', customerMiddleware, async (req, res) => {
         }
 
         if (paymentType === 'COD') {
+            const order = await createOrderFromCart({
+                customerId: req.customerid,
+                addressId,
+                paymentType,
+                cart,
+                subtotal,
+                discountAmount
+            });
 
-
-            const orderItems = cartItems.map((item) => ({
-                productId: item.productId,
-                itemId: item.productId,
-                variantId: item.variantId,
-                quantity: item.quantity,
-                mrp: item.variant.mrp,
-                sellingPrice: item.variant.sellingPrice,
-                total: Number(item.variant.sellingPrice) * item.quantity,
-                productName: item.product.title,
-                variantName: item.variant.name,
-                sku: item.variant.sku,
-                imageUrl: item.product.images?.[0] || null
-            }));
-
-            const created = await prisma.$transaction(async (tx) => {
-                const order = await tx.order.create({
-                    data: {
-                        customer: { connect: { id: customer.id } },
-                        shopkeeper: { connect: { id: [...shopkeeperIds][0] } },
-                        paymentType,
-                        discountAmount,
-                        grandTotal: subtotal - discountAmount,
-                        couponCode,
-                        ...(cart.coupon ? { coupon: { connect: { id: cart.coupon.id } } } : {}),
-                        deliveryAddress: { connect: { id: addressId } },
-                        orderItems: { create: orderItems }
-                    },
-                    include: {
-                        orderItems: { include: { item: { select: { title: true, unit: true } }, variant: { select: { name: true, mrp: true, sellingPrice: true, sku: true } } } },
-                        deliveryAddress: { select: { city: true, state: true, pincode: true, flatnumber: true, latitude: true, longitude: true } }
-                    }
-                });
-
-                if (cart.coupon) {
-                    await tx.coupon.update({ where: { id: cart.coupon.id }, data: { usedCount: { increment: 1 } } });
-                    await tx.couponUsage.create({ data: { couponId: cart.coupon.id, userId: customer.userid, orderId: order.id } });
-                }
-
-                await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
-                await tx.cart.update({ where: { id: cart.id }, data: { couponId: null } });
-
-                return order;
+            return res.json({
+                success: true,
+                type: 'COD',
+                order
             });
         }
         else {
             const razorpayOrder =
                 await razorpayInstance.orders.create({
-                    amount: Math.round(finalAmount * 100),
+                    amount: Math.round(subtotal * 100),
                     currency: 'INR',
                     receipt: `receipt_${Date.now()}`
                 });
@@ -467,7 +557,8 @@ customerCartRouter.post('/checkout', customerMiddleware, async (req, res) => {
             return res.json({
                 success: true,
                 type: 'ONLINE',
-                razorpayOrder
+                razorpayOrder,
+                razorpayKeyId: process.env.RAZORPAY_KEY_ID,
             });
         }
 
@@ -478,122 +569,132 @@ customerCartRouter.post('/checkout', customerMiddleware, async (req, res) => {
     }
 });
 
+customerCartRouter.post(
+    '/verify-checkout',
+    customerMiddleware,
+    async (req, res) => {
 
-async function createOrderFromCart({
-    customerId,
-    addressId,
-    paymentType,
-    cart,
-    subtotal,
-    discountAmount,
-    paymentData = null
-}) {
+        const {
+            razorpay_order_id,
+            razorpay_payment_id,
+            razorpay_signature,
+            addressId
+        } = req.body;
 
-    const customer = await prisma.customer.findUnique({
-        where: { id: customerId },
-        select: {
-            id: true,
-            userid: true
-        }
-    });
+        try {
 
-    const cartItems = cart.items;
 
-    const shopkeeperIds = new Set(
-        cartItems.map(
-            (item) => item.product.shopkeeperId
-        )
-    );
+            const body =
+                razorpay_order_id +
+                "|" +
+                razorpay_payment_id;
 
-    const orderItems = cartItems.map((item) => ({
-        productId: item.productId,
-        itemId: item.productId,
-        variantId: item.variantId,
-        quantity: item.quantity,
-        mrp: item.variant.mrp,
-        sellingPrice: item.variant.sellingPrice,
-        total:
-            Number(item.variant.sellingPrice) *
-            item.quantity,
-        productName: item.product.title,
-        variantName: item.variant.name,
-        sku: item.variant.sku,
-        imageUrl: item.product.images?.[0] || null
-    }));
+            const expectedSignature = crypto
+                .createHmac(
+                    'sha256',
+                    process.env.RAZORPAY_KEY_SECRET
+                )
+                .update(body.toString())
+                .digest('hex');
 
-    return prisma.$transaction(async (tx) => {
-
-        const order = await tx.order.create({
-            data: {
-                customer: {
-                    connect: { id: customer.id }
-                },
-
-                shopkeeper: {
-                    connect: {
-                        id: [...shopkeeperIds][0]
-                    }
-                },
-
-                paymentType,
-
-                discountAmount,
-
-                grandTotal: subtotal - discountAmount,
-
-                deliveryAddress: {
-                    connect: { id: addressId }
-                },
-
-                orderItems: {
-                    create: orderItems
-                }
-            },
-
-            include: {
-                orderItems: true
+            if (
+                expectedSignature !==
+                razorpay_signature
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid signature'
+                });
             }
-        });
 
-        // Create payment row for ONLINE
-        if (paymentData) {
 
-            await tx.payment.create({
-                data: {
-                    orderId: order.id,
-                    method: 'UPI',
-                    status: 'CAPTURED',
-                    amount: subtotal - discountAmount,
+            const payment =
+                await razorpayInstance.payments.fetch(
+                    razorpay_payment_id
+                );
 
-                    gatewayOrderId:
-                        paymentData.razorpay_order_id,
+            if (payment.status !== 'captured') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Payment not captured'
+                });
+            }
 
-                    gatewayPaymentId:
-                        paymentData.razorpay_payment_id,
 
-                    gatewaySignature:
-                        paymentData.razorpay_signature,
+            const cart = await loadCart(
+                req.customerid
+            );
 
-                    gatewayResponse: paymentData,
+            if (!cart || cart.items.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cart empty'
+                });
+            }
 
-                    paidAt: new Date()
-                }
+            const subtotal = cart.items.reduce(
+                (sum, item) =>
+                    sum +
+                    Number(item.variant.sellingPrice) *
+                    item.quantity,
+                0
+            );
+
+            let discountAmount = 0;
+
+            if (cart.coupon) {
+                discountAmount =
+                    calculateCouponDiscount(
+                        cart.coupon,
+                        subtotal
+                    );
+            }
+
+            const finalAmount =
+                subtotal - discountAmount;
+
+            // amount verify
+
+            if (
+                payment.amount !==
+                Math.round(finalAmount * 100)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Amount mismatch'
+                });
+            }
+
+
+            const order =
+                await createOrderFromCart({
+                    customerId: req.customerid,
+                    addressId,
+                    paymentType: 'ONLINE',
+                    cart,
+                    subtotal,
+                    discountAmount,
+
+                    paymentData: {
+                        razorpay_order_id,
+                        razorpay_payment_id,
+                        razorpay_signature
+                    }
+                });
+
+            return res.json({
+                success: true,
+                order
             });
 
+        } catch (err) {
+
+            console.error(err);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal Server Error'
+            });
         }
-
-        // clear cart
-        await tx.cartItem.deleteMany({
-            where: {
-                cartId: cart.id
-            }
-        });
-
-        await tx.cart.update({
-            where: { id: cart.id },
-            data: { couponId: null }
-        });
-
-        return order;
-    });
-}
+    }
+);

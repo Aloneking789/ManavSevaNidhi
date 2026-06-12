@@ -262,6 +262,14 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.array('images', 5), a
     const shopkeeperid = await req.shopkeeperid;
     const payload = req.body;
     try {
+
+        if (!payload.variants || payload.variants.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "At least one variant required"
+            });
+        }
+
         const shopkeeper = await prisma.shopkeeper.findUnique({ where: { id: shopkeeperid } });
         if (!shopkeeper) return res.status(404).json({ success: false, message: "Shopkeeper not found" });
 
