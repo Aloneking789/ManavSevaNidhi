@@ -78,6 +78,267 @@ const publicItemSelect = {
     }
 };
 
+customerInventoryRouter.get(
+    '/items/search',
+
+    async (req, res) => {
+
+        try {
+
+
+            const {
+                q,
+                limit = 20
+            } = req.query;
+
+            if (!q || !String(q).trim()) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Search query required"
+                });
+            }
+
+            const search =
+                String(q).trim();
+
+            // =========================
+            // ITEM SEARCH
+            // =========================
+
+            const matchedItems =
+                await prisma.item.findMany({
+
+                    where: {
+
+                        isActive: true,
+
+                        OR: [
+
+                            {
+                                title: {
+                                    contains: search,
+                                    mode: 'insensitive'
+                                }
+                            },
+
+                            {
+                                shortDescription: {
+                                    contains: search,
+                                    mode: 'insensitive'
+                                }
+                            },
+
+                            {
+                                description: {
+                                    contains: search,
+                                    mode: 'insensitive'
+                                }
+                            },
+
+                            {
+                                tags: {
+                                    has: search
+                                }
+                            },
+
+                            {
+                                slug: {
+                                    contains: search,
+                                    mode: 'insensitive'
+                                }
+                            },
+
+                            {
+                                category: {
+                                    title: {
+                                        contains: search,
+                                        mode: 'insensitive'
+                                    }
+                                }
+                            }
+                        ]
+                    },
+
+                    include: {
+
+                        category: true,
+
+                        variants: {
+
+                            where: {
+                                isActive: true
+                            },
+
+                            orderBy: {
+                                sortOrder: 'asc'
+                            }
+                        }
+                    },
+
+                    take: Number(limit)
+                });
+
+            // =========================
+            // VARIANT SEARCH
+            // =========================
+
+            const matchedVariants =
+                await prisma.productVariant.findMany({
+
+                    where: {
+
+                        isActive: true,
+
+                        OR: [
+
+                            {
+                                name: {
+                                    contains: search,
+                                    mode: 'insensitive'
+                                }
+                            },
+
+                            {
+                                sku: {
+                                    contains: search,
+                                    mode: 'insensitive'
+                                }
+                            },
+
+                            {
+                                product: {
+                                    title: {
+                                        contains: search,
+                                        mode: 'insensitive'
+                                    }
+                                }
+                            }
+                        ]
+                    },
+
+                    include: {
+
+                        product: {
+
+                            include: {
+
+                                category: true
+                            }
+                        }
+                    },
+
+                    take: Number(limit)
+                });
+
+            // =========================
+            // REMOVE DUPLICATES
+            // =========================
+
+            const itemIds =
+                new Set(
+                    matchedItems.map(
+                        item => item.id
+                    )
+                );
+
+            // Only keep variants whose
+            // products were NOT already matched
+
+            const filteredVariants =
+                matchedVariants.filter(
+                    variant =>
+                        !itemIds.has(
+                            variant.productId
+                        )
+                );
+
+            // =========================
+            // FORMAT VARIANT RESULTS
+            // =========================
+
+            const variantResults =
+                filteredVariants.map(
+                    variant => ({
+
+                        id: variant.product.id,
+
+                        title: variant.product.title,
+
+                        slug: variant.product.slug,
+
+                        images:
+                            variant.product.images,
+
+                        shortDescription:
+                            variant.product
+                                .shortDescription,
+
+                        averageRating:
+                            variant.product
+                                .averageRating,
+
+                        totalReviews:
+                            variant.product
+                                .totalReviews,
+
+                        category:
+                            variant.product
+                                .category,
+
+                        matchedVariants: [
+                            variant
+                        ]
+                    })
+                );
+
+            // =========================
+            // FORMAT ITEM RESULTS
+            // =========================
+
+            const itemResults =
+                matchedItems.map(item => ({
+
+                    ...item,
+
+                    matchedVariants:
+                        item.variants
+                }));
+
+            // =========================
+            // FINAL RESPONSE
+            // =========================
+
+            return res.status(200).json({
+
+                success: true,
+
+                total:
+                    itemResults.length +
+                    variantResults.length,
+
+                items: [
+
+                    ...itemResults,
+
+                    ...variantResults
+                ]
+            });
+
+        } catch (err) {
+
+            console.error(err);
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Something went wrong"
+            });
+
+        }
+    }
+);
 
 customerInventoryRouter.get(
     '/items',

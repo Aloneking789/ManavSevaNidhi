@@ -295,6 +295,8 @@ model Item {
   concerns         ProductConcern[]
   variants         ProductVariant[]
   wishlistItems    WishlistItem[]
+  averageRating    Float            @default(0)
+  totalReviews     Int              @default(0)
   shopkeeper       Shopkeeper       @relation(fields: [shopkeeperId], references: [id])
   shopkeeperId     String
   category         Category         @relation(fields: [categoryId], references: [id])
@@ -390,6 +392,7 @@ enum StockStatus {
 
 model ProductVariant {
   id            String   @id @default(cuid())
+  images        String[] @db.VarChar(255)
   productId     String
   product       Item     @relation(fields: [productId], references: [id], onDelete: Cascade)
   name          String
@@ -408,6 +411,8 @@ model ProductVariant {
   updatedAt     DateTime @updatedAt
   isAddedtoCart Boolean  @default(false)
   attributes    Json?
+  averageRating Float    @default(0)
+  totalReviews  Int      @default(0)
 
   orderItems    OrderItem[]
   cartItems     CartItem[]

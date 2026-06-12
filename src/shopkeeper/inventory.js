@@ -257,7 +257,7 @@ inventoryRouter.get('/category/:id/subcategories', shopkeeperMiddleware, async (
 });
 
 // Add item under a category (with up to 5 image files)
-inventoryRouter.post('/item', shopkeeperMiddleware, upload.array('images', 5), async (req, res) => {
+inventoryRouter.post('/item', shopkeeperMiddleware, upload.any(), async (req, res) => {
     // Accepts file uploads (`images`) or JSON `images` array in body.
     const shopkeeperid = await req.shopkeeperid;
     const payload = req.body;
@@ -274,15 +274,84 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.array('images', 5), a
         if (!shopkeeper) return res.status(404).json({ success: false, message: "Shopkeeper not found" });
 
         // Determine images: uploaded files (preferred) or images array/string in body
+        const files = req.files || [];
+
+        // =========================
+        // MAIN PRODUCT IMAGES
+        // =========================
+
+        const mainImageFiles =
+            files.filter(
+                file => file.fieldname === 'images'
+            );
+
         let imageUrls = [];
-        if (req.files && req.files.length > 0) {
-            if (req.files.length < 1 || req.files.length > 5) return res.status(400).json({ success: false, message: "You must provide between 1 and 5 image files." });
-            imageUrls = await uploadImageBuffers(req.files);
-        } else if (payload.images) {
-            // images may come as JSON-string or as array
-            if (typeof payload.images === 'string') {
-                try { imageUrls = JSON.parse(payload.images); } catch (e) { imageUrls = [payload.images]; }
-            } else if (Array.isArray(payload.images)) imageUrls = payload.images;
+
+        if (mainImageFiles.length > 0) {
+
+            if (
+                mainImageFiles.length < 1 ||
+                mainImageFiles.length > 5
+            ) {
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "You must provide between 1 and 5 product images."
+                });
+            }
+
+            imageUrls =
+                await uploadImageBuffers(
+                    mainImageFiles
+                );
+        }
+
+        // =========================
+        // VARIANT IMAGES MAP
+        // =========================
+
+        const variantImagesMap = {};
+
+        // Example:
+        // variantImages_0
+        // variantImages_1
+
+        const variantImageFields =
+            files.filter(file =>
+                file.fieldname.startsWith(
+                    'variantImages_'
+                )
+            );
+
+        for (const file of variantImageFields) {
+
+            const match =
+                file.fieldname.match(
+                    /^variantImages_(\d+)$/
+                );
+
+            if (!match) continue;
+
+            const variantIndex = match[1];
+
+            if (!variantImagesMap[variantIndex]) {
+                variantImagesMap[variantIndex] = [];
+            }
+
+            variantImagesMap[variantIndex].push(file);
+        }
+
+        // Upload all variant images
+
+        const uploadedVariantImages = {};
+
+        for (const index in variantImagesMap) {
+
+            uploadedVariantImages[index] =
+                await uploadImageBuffers(
+                    variantImagesMap[index]
+                );
         }
 
         // Validate category ownership if provided
@@ -340,8 +409,9 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.array('images', 5), a
         // Attach variants as nested create if present (keeps previous variant shape)
         if (variantsData) {
             createData.variants = {
-                create: variantsData.map(v => ({
+                create: variantsData.map((v, index) => ({
                     name: v.size || v.name || null,
+                    images: uploadedVariantImages[index] || [],
                     sku: v.sku || genSku(),
                     mrp: v.mrp !== undefined ? parseFloat(v.mrp) : (v.price !== undefined ? parseFloat(v.price) : 0),
                     sellingPrice: v.sellingPrice !== undefined ? parseFloat(v.sellingPrice) : (v.price !== undefined ? parseFloat(v.price) : 0),
