@@ -1,8 +1,15 @@
 import { Router } from "express";
 import { prisma } from '../../config/prismaConfig.js';
 import { customerMiddleware } from "../../middlewares/customerAuth.js";
-
+import Razorpay from "razorpay";
 export const customerCartRouter = Router();
+
+const razorpayInstance = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
+
+
 
 function isCouponApplicableToItems(coupon, items) {
     const applicableOn = Array.isArray(coupon?.applicableOn) ? coupon.applicableOn : [];
@@ -402,49 +409,67 @@ customerCartRouter.post('/checkout', customerMiddleware, async (req, res) => {
             couponCode = cart.coupon.code;
         }
 
-        const orderItems = cartItems.map((item) => ({
-            productId: item.productId,
-            itemId: item.productId,
-            variantId: item.variantId,
-            quantity: item.quantity,
-            mrp: item.variant.mrp,
-            sellingPrice: item.variant.sellingPrice,
-            total: Number(item.variant.sellingPrice) * item.quantity,
-            productName: item.product.title,
-            variantName: item.variant.name,
-            sku: item.variant.sku,
-            imageUrl: item.product.images?.[0] || null
-        }));
+        if (paymentType === 'COD') {
 
-        const created = await prisma.$transaction(async (tx) => {
-            const order = await tx.order.create({
-                data: {
-                    customer: { connect: { id: customer.id } },
-                    shopkeeper: { connect: { id: [...shopkeeperIds][0] } },
-                    paymentType,
-                    discountAmount,
-                    grandTotal: subtotal - discountAmount,
-                    couponCode,
-                    ...(cart.coupon ? { coupon: { connect: { id: cart.coupon.id } } } : {}),
-                    deliveryAddress: { connect: { id: addressId } },
-                    orderItems: { create: orderItems }
-                },
-                include: {
-                    orderItems: { include: { item: { select: { title: true, unit: true } }, variant: { select: { name: true, mrp: true, sellingPrice: true, sku: true } } } },
-                    deliveryAddress: { select: { city: true, state: true, pincode: true, flatnumber: true, latitude: true, longitude: true } }
+
+            const orderItems = cartItems.map((item) => ({
+                productId: item.productId,
+                itemId: item.productId,
+                variantId: item.variantId,
+                quantity: item.quantity,
+                mrp: item.variant.mrp,
+                sellingPrice: item.variant.sellingPrice,
+                total: Number(item.variant.sellingPrice) * item.quantity,
+                productName: item.product.title,
+                variantName: item.variant.name,
+                sku: item.variant.sku,
+                imageUrl: item.product.images?.[0] || null
+            }));
+
+            const created = await prisma.$transaction(async (tx) => {
+                const order = await tx.order.create({
+                    data: {
+                        customer: { connect: { id: customer.id } },
+                        shopkeeper: { connect: { id: [...shopkeeperIds][0] } },
+                        paymentType,
+                        discountAmount,
+                        grandTotal: subtotal - discountAmount,
+                        couponCode,
+                        ...(cart.coupon ? { coupon: { connect: { id: cart.coupon.id } } } : {}),
+                        deliveryAddress: { connect: { id: addressId } },
+                        orderItems: { create: orderItems }
+                    },
+                    include: {
+                        orderItems: { include: { item: { select: { title: true, unit: true } }, variant: { select: { name: true, mrp: true, sellingPrice: true, sku: true } } } },
+                        deliveryAddress: { select: { city: true, state: true, pincode: true, flatnumber: true, latitude: true, longitude: true } }
+                    }
+                });
+
+                if (cart.coupon) {
+                    await tx.coupon.update({ where: { id: cart.coupon.id }, data: { usedCount: { increment: 1 } } });
+                    await tx.couponUsage.create({ data: { couponId: cart.coupon.id, userId: customer.userid, orderId: order.id } });
                 }
+
+                await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
+                await tx.cart.update({ where: { id: cart.id }, data: { couponId: null } });
+
+                return order;
             });
+        }
+        else {
+            const razorpayOrder =
+                await razorpayInstance.orders.create({
+                    amount: Math.round(finalAmount * 100),
+                    currency: 'INR',
+                    receipt: `receipt_${Date.now()}`
+                });
 
-            if (cart.coupon) {
-                await tx.coupon.update({ where: { id: cart.coupon.id }, data: { usedCount: { increment: 1 } } });
-                await tx.couponUsage.create({ data: { couponId: cart.coupon.id, userId: customer.userid, orderId: order.id } });
-            }
-
-            await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
-            await tx.cart.update({ where: { id: cart.id }, data: { couponId: null } });
-
-            return order;
-        });
+            return res.json({
+                success: true,
+                type: 'ONLINE',
+                razorpayOrder
+            });
+        }
 
         return res.json({ success: true, order: created });
     } catch (err) {
@@ -452,3 +477,123 @@ customerCartRouter.post('/checkout', customerMiddleware, async (req, res) => {
         return res.status(500).json({ success: false, message: 'Internal Server Error' });
     }
 });
+
+
+async function createOrderFromCart({
+    customerId,
+    addressId,
+    paymentType,
+    cart,
+    subtotal,
+    discountAmount,
+    paymentData = null
+}) {
+
+    const customer = await prisma.customer.findUnique({
+        where: { id: customerId },
+        select: {
+            id: true,
+            userid: true
+        }
+    });
+
+    const cartItems = cart.items;
+
+    const shopkeeperIds = new Set(
+        cartItems.map(
+            (item) => item.product.shopkeeperId
+        )
+    );
+
+    const orderItems = cartItems.map((item) => ({
+        productId: item.productId,
+        itemId: item.productId,
+        variantId: item.variantId,
+        quantity: item.quantity,
+        mrp: item.variant.mrp,
+        sellingPrice: item.variant.sellingPrice,
+        total:
+            Number(item.variant.sellingPrice) *
+            item.quantity,
+        productName: item.product.title,
+        variantName: item.variant.name,
+        sku: item.variant.sku,
+        imageUrl: item.product.images?.[0] || null
+    }));
+
+    return prisma.$transaction(async (tx) => {
+
+        const order = await tx.order.create({
+            data: {
+                customer: {
+                    connect: { id: customer.id }
+                },
+
+                shopkeeper: {
+                    connect: {
+                        id: [...shopkeeperIds][0]
+                    }
+                },
+
+                paymentType,
+
+                discountAmount,
+
+                grandTotal: subtotal - discountAmount,
+
+                deliveryAddress: {
+                    connect: { id: addressId }
+                },
+
+                orderItems: {
+                    create: orderItems
+                }
+            },
+
+            include: {
+                orderItems: true
+            }
+        });
+
+        // Create payment row for ONLINE
+        if (paymentData) {
+
+            await tx.payment.create({
+                data: {
+                    orderId: order.id,
+                    method: 'UPI',
+                    status: 'CAPTURED',
+                    amount: subtotal - discountAmount,
+
+                    gatewayOrderId:
+                        paymentData.razorpay_order_id,
+
+                    gatewayPaymentId:
+                        paymentData.razorpay_payment_id,
+
+                    gatewaySignature:
+                        paymentData.razorpay_signature,
+
+                    gatewayResponse: paymentData,
+
+                    paidAt: new Date()
+                }
+            });
+
+        }
+
+        // clear cart
+        await tx.cartItem.deleteMany({
+            where: {
+                cartId: cart.id
+            }
+        });
+
+        await tx.cart.update({
+            where: { id: cart.id },
+            data: { couponId: null }
+        });
+
+        return order;
+    });
+}
