@@ -33,7 +33,7 @@ app.get(/(.*)/, (req, res) => {
 });
 
 
-app.listen(process.env.PORT || 3000, "0.0.0.0", (req, res, next) => {
+app.listen(process.env.PORT || 7000, "0.0.0.0", (req, res, next) => {
   console.log('app is listening on port : ', process.env.PORT || 3000);
 })
 

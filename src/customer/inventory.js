@@ -57,7 +57,6 @@ customerInventoryRouter.get('/items', (req, res, next) => {
 }, async (req, res) => {
     try {
 
-        // customer info not required for public listing
         let customer = null;
 
         const items = await prisma.item.findMany({
@@ -215,7 +214,6 @@ customerInventoryRouter.get('/item/:id', (req, res, next) => {
     const { id } = req.params;
     try {
 
-        // customer context not needed for single item fetch
         let customer = null;
 
         const item = await prisma.item.findFirst({

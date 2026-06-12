@@ -58,6 +58,29 @@ async function loadCart(customerId) {
     });
 }
 
+
+async function getItemCount(customerId) {
+    const customer = await prisma.customer.findUnique({
+        where: { id: customerId },
+        select: { userid: true }
+    });
+
+    if (!customer) {
+        return null;
+    }
+
+    return prisma.cart.findUnique({
+        where: { userId: customer.userid },
+        select: {
+            _count: {
+                select: {
+                    items: true,
+                },
+            },
+        },
+    });
+}
+
 function shapeCart(cart) {
     if (!cart) {
         return { id: null, coupon: null, items: [], subtotal: 0, itemCount: 0 };
@@ -138,6 +161,20 @@ customerCartRouter.get('/summary', customerMiddleware, async (req, res) => {
                 total: shaped.subtotal - discount,
                 coupon: shaped.coupon
             }
+        });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, message: 'Something went wrong' });
+    }
+});
+customerCartRouter.get('/count', customerMiddleware, async (req, res) => {
+    try {
+        const cart = await getItemCount(req.customerid);
+
+
+        return res.json({
+            success: true,
+            itemCount
         });
     } catch (err) {
         console.error(err);
