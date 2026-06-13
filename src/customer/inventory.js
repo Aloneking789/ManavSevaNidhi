@@ -72,8 +72,26 @@ const publicItemSelect = {
         },
 
         select: {
+
+            id: true,
+
+            name: true,
+
+            images: true,
+
+            sku: true,
+
+            mrp: true,
+
             sellingPrice: true,
-            mrp: true
+
+            stockQty: true,
+
+            isDefault: true,
+
+            averageRating: true,
+
+            totalReviews: true
         }
     }
 };
@@ -374,54 +392,19 @@ customerInventoryRouter.get(
             const formattedItems =
                 items.map((item) => {
 
-                    const prices =
-                        item.variants.map(
-                            (variant) =>
-                                Number(
-                                    variant.sellingPrice
-                                )
-                        );
+                    const defaultVariant =
+                        item.variants.find(
+                            variant =>
+                                variant.isDefault
+                        ) || null;
 
-                    const mrps =
-                        item.variants.map(
-                            (variant) =>
-                                Number(variant.mrp)
-                        );
-
-                    const startingPrice =
-                        prices.length > 0
-                            ? Math.min(...prices)
-                            : null;
-
-                    const maxPrice =
-                        prices.length > 0
-                            ? Math.max(...prices)
-                            : null;
-
-                    const startingMrp =
-                        mrps.length > 0
-                            ? Math.min(...mrps)
-                            : null;
-
-                    const maxMrp =
-                        mrps.length > 0
-                            ? Math.max(...mrps)
-                            : null;
-
-                    // REMOVE VARIANTS FROM RESPONSE
                     delete item.variants;
 
                     return {
 
                         ...item,
 
-                        startingPrice,
-
-                        maxPrice,
-
-                        startingMrp,
-
-                        maxMrp
+                        defaultVariant
                     };
                 });
 

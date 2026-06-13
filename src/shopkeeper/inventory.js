@@ -263,12 +263,12 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.any(), async (req, re
     const payload = req.body;
     try {
 
-        if (!payload.variants || payload.variants.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "At least one variant required"
-            });
-        }
+        // if (!payload.variants || payload.variants.length === 0) {
+        //     return res.status(400).json({
+        //         success: false,
+        //         message: "At least one variant required"
+        //     });
+        // }
 
         const shopkeeper = await prisma.shopkeeper.findUnique({ where: { id: shopkeeperid } });
         if (!shopkeeper) return res.status(404).json({ success: false, message: "Shopkeeper not found" });
@@ -369,6 +369,38 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.any(), async (req, re
             } catch (e) {
                 return res.status(400).json({ success: false, message: 'Invalid variants JSON.' });
             }
+        }
+
+        if (!variantsData || variantsData.length === 0) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "At least one variant is required"
+            });
+        }
+
+        const defaultVariants =
+            variantsData.filter(
+                v => v.isDefault === true
+            );
+
+        if (defaultVariants.length === 0) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "One variant must be set as default"
+            });
+        }
+
+        if (defaultVariants.length > 1) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Only one variant can be default"
+            });
         }
 
         // Build create data mapping newer product fields
