@@ -207,8 +207,13 @@ customerOrdersRouter.get('/', customerMiddleware, async (req, res) => {
             where: { customerId: req.customerid },
             orderBy: { createdAt: 'desc' },
             include: {
+                orderItems: {
+                    include: {
+                        item: { select: { title: true, images: true } },
+                        variant: { select: { name: true, mrp: true, images: true } }
+                    }
+                },
                 shopkeeper: { select: { shopname: true } },
-                deliveryAddress: { select: { city: true, state: true, pincode: true, flatnumber: true, latitude: true, longitude: true } }
             }
         });
 
@@ -219,7 +224,10 @@ customerOrdersRouter.get('/', customerMiddleware, async (req, res) => {
             grandTotal: o.grandTotal,
             status: o.status,
             createdAt: o.createdAt,
-            shopkeeper: o.shopkeeper
+            shopkeeper: o.shopkeeper,
+            orderItems: o.orderItems.map(oi => ({
+                variant: oi.variant
+            })),
         }));
 
         res.json({ success: true, orders: shaped });
