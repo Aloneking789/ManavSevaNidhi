@@ -166,37 +166,119 @@ authRouter.post('/signin', async (req, res) => {
     }
 });
 
-authRouter.get('/profile', customerMiddleware, async (req, res) => {
-    try {
-        const customer = await prisma.customer.findUnique({
-            where: { id: req.customerid },
-            include: {
-                user: {
-                    select: {
-                        id: true,
-                        email: true,
-                        name: true,
-                        phone: true,
-                        gender: true,
-                        dateOfBirth: true,
-                        avatar: true,
-                        profileimage: true,
+
+authRouter.get(
+    '/profile',
+
+    customerMiddleware,
+
+    async (req, res) => {
+
+        try {
+
+            const customer =
+                await prisma.customer.findUnique({
+
+                    where: {
+                        id: req.customerid
                     },
-                },
-                houseaddress: true,
-            },
-        });
 
-        if (!customer) {
-            return res.status(404).json({ success: false, message: 'Customer not found' });
+                    include: {
+
+                        user: {
+
+                            select: {
+
+                                id: true,
+
+                                email: true,
+
+                                name: true,
+
+                                phone: true,
+
+                                gender: true,
+
+                                dateOfBirth: true,
+
+                                avatar: true,
+
+                                profileimage: true
+                            }
+                        },
+
+                        houseaddress: true,
+
+                        _count: {
+
+                            select: {
+
+                                orders: true,
+
+                                wishlistItems: true,
+
+                                houseaddress: true
+                            }
+                        }
+                    }
+                });
+
+            if (!customer) {
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        'Customer not found'
+                });
+            }
+
+            // =========================
+            // FORMAT COUNTS
+            // =========================
+
+            const profile = {
+
+                ...customer,
+
+                ordersCount:
+                    customer._count.orders,
+
+                wishlistCount:
+                    customer._count.wishlistItems,
+
+                addressCount:
+                    customer._count.houseaddress
+            };
+
+            // remove raw prisma _count
+            delete profile._count;
+
+            return res.status(200).json({
+
+                success: true,
+
+                profile
+            });
+
+        } catch (err) {
+
+            console.error(
+                'Customer profile error:',
+                err
+            );
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    'Profile fetch failed'
+            });
         }
-
-        return res.status(200).json({ success: true, profile: customer });
-    } catch (err) {
-        console.error('Customer profile error:', err);
-        return res.status(500).json({ success: false, message: 'Profile fetch failed' });
     }
-});
+);
 
 authRouter.put('/profile', customerMiddleware, async (req, res) => {
     try {

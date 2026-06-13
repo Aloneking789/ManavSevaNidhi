@@ -813,25 +813,86 @@ customerInventoryRouter.get('/category/:categoryId/subcategories', (req, res, ne
     }
 });
 
-customerInventoryRouter.get('/category/:categoryId/items', (req, res, next) => {
-    if (req.headers.authorization) {
-        return customerMiddleware(req, res, next);
-    }
-    next();
-}, async (req, res) => {
-    const { categoryId } = req.params;
-    try {
 
-        // customer context not needed for category item listing
-        let customer = null;
+customerInventoryRouter.get(
 
-        const items = await prisma.item.findMany({
-            where: { categoryId, isActive: true },
-            select: publicItemSelect
-        });
-        res.status(200).json({ success: true, items });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, message: "Something went wrong" });
+    '/category/:categoryId/items',
+
+    (req, res, next) => {
+
+        if (req.headers.authorization) {
+
+            return customerMiddleware(
+                req,
+                res,
+                next
+            );
+        }
+
+        next();
+    },
+
+    async (req, res) => {
+
+        const { categoryId } = req.params;
+
+        try {
+
+            const items =
+                await prisma.item.findMany({
+
+                    where: {
+
+                        categoryId,
+
+                        isActive: true
+                    },
+
+                    select: publicItemSelect
+                });
+
+            // =========================
+            // FORMAT SAME AS /items
+            // =========================
+
+            const formattedItems =
+                items.map((item) => {
+
+                    const defaultVariant =
+                        item.variants.find(
+                            (variant) =>
+                                variant.isDefault
+                        ) || null;
+
+                    delete item.variants;
+
+                    return {
+
+                        ...item,
+
+                        defaultVariant
+                    };
+                });
+
+            return res.status(200).json({
+
+                success: true,
+
+                items: formattedItems
+            });
+
+        } catch (err) {
+
+            console.error(err);
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Something went wrong"
+            });
+
+        }
     }
-});
+);
