@@ -297,12 +297,12 @@ customerCartRouter.get('/summary', customerMiddleware, async (req, res) => {
 });
 customerCartRouter.get('/count', customerMiddleware, async (req, res) => {
     try {
-        const cart = await getItemCount(req.customerid);
+        const itemCount = await getItemCount(req.customerid);
 
 
         return res.json({
             success: true,
-            itemCount
+            count : itemCount._count.items
         });
     } catch (err) {
         console.error(err);
