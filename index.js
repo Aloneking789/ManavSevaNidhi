@@ -13,6 +13,7 @@ dotenv.config();
 
 // Allow all origins (CORS)
 app.use(cors({ origin: '*' }));
+
 app.use(cookie());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
