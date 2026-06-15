@@ -203,9 +203,11 @@ authRouter.get(
 
                                 avatar: true,
 
-                                profileimage: true
+                                profileimage: true,
+
                             }
                         },
+
 
                         houseaddress: true,
 
@@ -214,8 +216,6 @@ authRouter.get(
                             select: {
 
                                 orders: true,
-
-                                wishlistItems: true,
 
                                 houseaddress: true
                             }
