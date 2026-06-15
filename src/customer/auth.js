@@ -205,6 +205,17 @@ authRouter.get(
 
                                 profileimage: true,
 
+                                wishlist: {
+                                    select: {
+                                        _count: {
+                                            select: {
+                                                // 3. Changed from 'wishlistItems' to 'items' to match your schema
+                                                items: true
+                                            }
+                                        }
+                                    }
+                                }
+
                             }
                         },
 
