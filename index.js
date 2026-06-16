@@ -11,7 +11,6 @@ import { shopkeeperRouter } from './src/shopkeeper/shopkeeper.route.js'
 const app = express();
 dotenv.config();
 
-// Allow all origins (CORS)
 app.use(cors());
 
 app.use(cookie());
@@ -21,7 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 // middlewares and routings
 
 app.get('/', (req, res) => {
-  res.send("Buildkart is Healthy")
+  res.send("Shilajeet is Healthy")
 })
 
 
@@ -34,8 +33,8 @@ app.get(/(.*)/, (req, res) => {
 });
 
 
-app.listen(process.env.PORT || 7000, "0.0.0.0", (req, res, next) => {
-  console.log('app is listening on port : ', process.env.PORT || 3000);
+app.listen(process.env.PORT || 8001, "0.0.0.0", (req, res, next) => {
+  console.log('app is listening on port : ', process.env.PORT || 8001);
 })
 
 

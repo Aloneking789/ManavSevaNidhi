@@ -830,8 +830,92 @@ inventoryRouter.get('/categories', shopkeeperMiddleware, async (req, res) => {
 // Get all items
 inventoryRouter.get('/items', shopkeeperMiddleware, async (req, res) => {
     try {
+        const page = Number(req.query.page) || 1;
+        const limit = Number(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        // 1. Extract all potential query parameters
+        const {
+            // Text Search
+            search,
+            // Relations
+            categoryId, variantStatus,
+            // Booleans
+            isBestSeller, isFeatured, isActive, isBundle,
+            // Arrays (Scalar Lists)
+            tags, skinType, benefits,
+            // Exact Strings
+            availability, unit,
+            // Numbers
+            minRating, minPurchase
+        } = req.query;
+
+        // 2. Initialize the dynamic where clause
+        const whereClause = {
+            shopkeeperId: await req.shopkeeperid,
+        };
+
+        // --- TEXT SEARCH (Case-insensitive) ---
+        // Searches for the keyword in either the title OR the short description
+        if (search) {
+            whereClause.OR = [
+                { title: { contains: String(search), mode: 'insensitive' } },
+                { shortDescription: { contains: String(search), mode: 'insensitive' } }
+            ];
+        }
+
+        // --- RELATIONS ---
+        if (categoryId) {
+            whereClause.categoryId = String(categoryId);
+        }
+        if (variantStatus === 'active') {
+            whereClause.variants = { some: { isActive: true } };
+        }
+
+        // --- BOOLEANS ---
+        // Helper function to keep code DRY for boolean checks
+        const applyBooleanFilter = (key, value) => {
+            if (value === 'true') whereClause[key] = true;
+            if (value === 'false') whereClause[key] = false;
+        };
+        applyBooleanFilter('isBestSeller', isBestSeller);
+        applyBooleanFilter('isFeatured', isFeatured);
+        applyBooleanFilter('isActive', isActive);
+        applyBooleanFilter('isBundle', isBundle);
+
+        // --- EXACT STRINGS ---
+        if (availability) whereClause.availability = String(availability);
+        if (unit) whereClause.unit = String(unit);
+
+        // --- ARRAYS (PostgreSQL Scalar Lists) ---
+        // Expects comma-separated values in URL: ?tags=organic,vegan
+        const applyArrayFilter = (key, value) => {
+            if (value) {
+                const valuesArray = String(value).split(',').map(v => v.trim());
+                // hasSome returns items that match ANY of the provided array values
+                whereClause[key] = { hasSome: valuesArray };
+            }
+        };
+        applyArrayFilter('tags', tags);
+        applyArrayFilter('skinType', skinType);
+        applyArrayFilter('benefits', benefits);
+
+        // --- NUMBERS ---
+        if (minRating) {
+            whereClause.averageRating = { gte: parseFloat(minRating) }; // gte = Greater Than or Equal
+        }
+        if (minPurchase) {
+            whereClause.minimumpurchase = { gte: parseInt(minPurchase, 10) };
+        }
+
+        // 3. Get total count for frontend pagination
+        const totalItems = await prisma.item.count({
+            where: whereClause
+        });
+
+        // 4. Execute the query
         const items = await prisma.item.findMany({
-            where: { shopkeeperId: await req.shopkeeperid },
+            where: whereClause,
             select: {
                 id: true,
                 title: true,
@@ -842,21 +926,43 @@ inventoryRouter.get('/items', shopkeeperMiddleware, async (req, res) => {
                 description: true,
                 minimumpurchase: true,
                 warranty: true,
+                isFeatured: true,
                 addons: true,
                 tags: true,
-                categoryId: true,
                 isActive: true,
                 isBundle: true,
-                createdAt: true
-            }
+                createdAt: true,
+                isBestSeller: true,
+                averageRating: true,
+                availability: true,
+                _count: {
+                    select: { variants: true }
+                },
+                category: {
+                    select: { title: true, id: true }
+                }
+            },
+            skip,
+            take: limit,
+            // Optional: Add sorting (e.g., newest first)
+            orderBy: { createdAt: 'desc' }
         });
-        res.status(200).json({ success: true, items });
+
+        res.status(200).json({
+            success: true,
+            pagination: {
+                total: totalItems,
+                page,
+                limit,
+                totalPages: Math.ceil(totalItems / limit)
+            },
+            items
+        });
     } catch (err) {
         console.error(err);
         res.status(500).json({ success: false, message: "Something went wrong" });
     }
 });
-
 // Get items under a specific category
 inventoryRouter.get('/category/:categoryId/items', shopkeeperMiddleware, async (req, res) => {
     const { categoryId } = req.params;

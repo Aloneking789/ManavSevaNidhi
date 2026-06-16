@@ -51,6 +51,62 @@ addressRouter.post('/add', customerMiddleware, async (req, res) => {
     }
 });
 
+addressRouter.put('/update/:id', customerMiddleware, async (req, res) => {
+    const addressId = req.params.id;
+    const customerid = req.customerid;
+    const { city, state, pincode, flatnumber, latitude, longitude } = req.body;
+
+    try {
+        // 1. Verify the address exists AND belongs to the authenticated customer
+        const existingAddress = await prisma.address.findFirst({
+            where: { 
+                id: addressId,
+                customerId: customerid // Adjust this field name if your Prisma relation uses a different key
+            }
+        });
+
+        if (!existingAddress) {
+            return res.status(404).json({ 
+                success: false, 
+                message: "Address not found or unauthorized" 
+            });
+        }
+
+        // 2. Prepare dynamic update data to only touch provided fields
+        const updateData = {};
+        if (city !== undefined) updateData.city = city;
+        if (state !== undefined) updateData.state = state;
+        if (pincode !== undefined) updateData.pincode = pincode;
+        if (flatnumber !== undefined) updateData.flatnumber = flatnumber;
+        
+        if (latitude !== undefined && latitude !== null) {
+            updateData.latitude = parseFloat(latitude);
+        }
+        if (longitude !== undefined && longitude !== null) {
+            updateData.longitude = parseFloat(longitude);
+        }
+
+        // 3. Update the address in the database
+        const updatedAddress = await prisma.address.update({
+            where: { id: addressId },
+            data: updateData
+        });
+
+        res.status(200).json({ success: true, address: updatedAddress });
+    } catch (err) {
+        console.error(err);
+        // Handle Prisma unique constraint error (if applicable for addresses)
+        if (err && err.code === 'P2002') {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Unique constraint failed', 
+                details: err.meta 
+            });
+        }
+        res.status(500).json({ success: false, message: "Something went wrong" });
+    }
+});
+
 // Get all addresses for a customer by customer id
 addressRouter.get('/all', customerMiddleware, async (req, res) => {
     const customerid = req.customerid;

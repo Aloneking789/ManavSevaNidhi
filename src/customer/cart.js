@@ -302,7 +302,7 @@ customerCartRouter.get('/count', customerMiddleware, async (req, res) => {
 
         return res.json({
             success: true,
-            count : itemCount._count.items
+            count: itemCount._count.items
         });
     } catch (err) {
         console.error(err);

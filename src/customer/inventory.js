@@ -560,149 +560,192 @@ customerInventoryRouter.get('/banners', async (req, res) => {
     }
 });
 
+// customerInventoryRouter.get(
+//     '/item/:id',
 
-// customerInventoryRouter.get('/item/:id', (req, res, next) => {
-//     if (req.headers.authorization) {
-//         return customerMiddleware(req, res, next);
-//     }
-//     next();
-// }, async (req, res) => {
-//     const { id } = req.params;
-//     try {
+//     (req, res, next) => {
 
-//         let customer = null;
+//         if (req.headers.authorization) {
+//             return customerMiddleware(req, res, next);
+//         }
 
-//         const item = await prisma.item.findFirst({
-//             where: { id, isActive: true },
-//             include: {
-//                 variants: {
-//                     select: {
-//                         id: true,
-//                         name: true,
-//                         sku: true,
-//                         mrp: true,
-//                         sellingPrice: true,
-//                         costPrice: true,
-//                         weight: true,
-//                         volume: true,
-//                         lowStockAlert: true,
-//                         isDefault: true,
-//                         isActive: true,
-//                         sortOrder: true,
-//                         reviews: {
-//                             where : {
-//                                 status : "APPROVED"
-//                             },
-//                             select: {
-//                                 rating: true,
-//                                 body: true,
-//                                 user: {
+//         next();
+
+//     },
+
+//     async (req, res) => {
+
+//         const { id } = req.params;
+
+//         try {
+
+//             const item =
+//                 await prisma.item.findFirst({
+
+//                     where: {
+//                         id,
+//                         isActive: true
+//                     },
+
+//                     include: {
+
+//                         variants: {
+
+//                             include: {
+
+//                                 reviews: {
+
+//                                     where: {
+//                                         status: 'APPROVED'
+//                                     },
+
 //                                     select: {
-//                                         name: true
+
+//                                         rating: true,
+
+//                                         body: true,
+
+//                                         user: {
+//                                             select: {
+//                                                 name: true
+//                                             }
+//                                         }
 //                                     }
 //                                 }
 //                             }
+//                         },
+
+//                         category: {
+//                             select: {
+//                                 id: true,
+//                                 title: true,
+//                                 slug: true,
+//                                 description: true,
+//                                 imageUrl: true,
+//                                 bannerUrl: true,
+//                                 parentId: true,
+//                                 isActive: true,
+//                                 sortOrder: true,
+//                                 metaTitle: true,
+//                                 metaDesc: true,
+//                                 createdAt: true
+//                             }
 //                         }
 //                     }
-//                 },
-//                 category: {
-//                     select: {
-//                         id: true,
-//                         title: true,
-//                         slug: true,
-//                         description: true,
-//                         imageUrl: true,
-//                         bannerUrl: true,
-//                         parentId: true,
-//                         isActive: true,
-//                         sortOrder: true,
-//                         metaTitle: true,
-//                         metaDesc: true,
-//                         createdAt: true
-//                     }
-//                 }
+//                 });
+
+//             if (!item) {
+//                 return res.status(404).json({
+//                     success: false,
+//                     message: "Item not found"
+//                 });
 //             }
-//         });
-//         if (!item) return res.status(404).json({ success: false, message: "Item not found" });
-//         res.status(200).json({ success: true, item });
-//     } catch (err) {
-//         console.error(err);
-//         res.status(500).json({ success: false, message: "Something went wrong" });
+
+//             // =========================
+//             // VARIANT AVG RATING
+//             // =========================
+
+//             item.variants = item.variants.map(
+//                 (variant) => {
+
+//                     const totalReviews =
+//                         variant.reviews.length;
+
+//                     const averageRating =
+//                         totalReviews > 0
+//                             ? Number(
+//                                 (
+//                                     variant.reviews.reduce(
+//                                         (sum, review) =>
+//                                             sum +
+//                                             review.rating,
+//                                         0
+//                                     ) / totalReviews
+//                                 ).toFixed(1)
+//                             )
+//                             : null;
+
+//                     return {
+
+//                         ...variant,
+
+//                         averageRating,
+
+//                         totalReviews
+//                     };
+//                 }
+//             );
+
+//             return res.status(200).json({
+//                 success: true,
+//                 item
+//             });
+
+//         } catch (err) {
+
+//             console.error(err);
+
+//             return res.status(500).json({
+//                 success: false,
+//                 message: "Something went wrong"
+//             });
+
+//         }
 //     }
-// });
+// );
+
 customerInventoryRouter.get(
     '/item/:id',
-
     (req, res, next) => {
-
         if (req.headers.authorization) {
+            // Assuming this middleware attaches `req.customerid` and calls next()
             return customerMiddleware(req, res, next);
         }
-
         next();
-
     },
-
     async (req, res) => {
-
         const { id } = req.params;
 
         try {
-
-            const item =
-                await prisma.item.findFirst({
-
-                    where: {
-                        id,
-                        isActive: true
-                    },
-
-                    include: {
-
-                        variants: {
-
-                            include: {
-
-                                reviews: {
-
-                                    where: {
-                                        status: 'APPROVED'
-                                    },
-
-                                    select: {
-
-                                        rating: true,
-
-                                        body: true,
-
-                                        user: {
-                                            select: {
-                                                name: true
-                                            }
-                                        }
+            // 1. Fetch the Item with its relations
+            const item = await prisma.item.findFirst({
+                where: {
+                    id,
+                    isActive: true
+                },
+                include: {
+                    variants: {
+                        include: {
+                            reviews: {
+                                where: { status: 'APPROVED' },
+                                select: {
+                                    rating: true,
+                                    body: true,
+                                    user: {
+                                        select: { name: true }
                                     }
                                 }
                             }
-                        },
-
-                        category: {
-                            select: {
-                                id: true,
-                                title: true,
-                                slug: true,
-                                description: true,
-                                imageUrl: true,
-                                bannerUrl: true,
-                                parentId: true,
-                                isActive: true,
-                                sortOrder: true,
-                                metaTitle: true,
-                                metaDesc: true,
-                                createdAt: true
-                            }
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            title: true,
+                            slug: true,
+                            description: true,
+                            imageUrl: true,
+                            bannerUrl: true,
+                            parentId: true,
+                            isActive: true,
+                            sortOrder: true,
+                            metaTitle: true,
+                            metaDesc: true,
+                            createdAt: true
                         }
                     }
-                });
+                }
+            });
 
             if (!item) {
                 return res.status(404).json({
@@ -712,39 +755,80 @@ customerInventoryRouter.get(
             }
 
             // =========================
-            // VARIANT AVG RATING
+            // CART & WISHLIST TRACKING
             // =========================
+            const userCartVariantIds = new Set();
+            const userWishlistVariantIds = new Set();
+            const userWishlistProductIds = new Set();
 
-            item.variants = item.variants.map(
-                (variant) => {
+            // If the user is authenticated, req.customerid should be available
+            if (req.customerid) {
+                // Find the user ID associated with this customer profile
+                const customer = await prisma.customer.findUnique({
+                    where: { id: req.customerid },
+                    select: { userid: true }
+                });
 
-                    const totalReviews =
-                        variant.reviews.length;
+                if (customer) {
+                    const userId = customer.userid;
 
-                    const averageRating =
-                        totalReviews > 0
-                            ? Number(
-                                (
-                                    variant.reviews.reduce(
-                                        (sum, review) =>
-                                            sum +
-                                            review.rating,
-                                        0
-                                    ) / totalReviews
-                                ).toFixed(1)
-                            )
-                            : null;
+                    // Fetch user's cart items
+                    const cart = await prisma.cart.findUnique({
+                        where: { userId },
+                        select: { items: { select: { variantId: true } } }
+                    });
 
-                    return {
+                    if (cart) {
+                        cart.items.forEach(ci => userCartVariantIds.add(ci.variantId));
+                    }
 
-                        ...variant,
+                    // Fetch user's wishlist items
+                    const wishlist = await prisma.wishlist.findUnique({
+                        where: { userId },
+                        select: { items: { select: { productId: true, variantId: true } } }
+                    });
 
-                        averageRating,
-
-                        totalReviews
-                    };
+                    if (wishlist) {
+                        wishlist.items.forEach(wi => {
+                            userWishlistProductIds.add(wi.productId);
+                            if (wi.variantId) {
+                                userWishlistVariantIds.add(wi.variantId);
+                            }
+                        });
+                    }
                 }
-            );
+            }
+
+            // =========================
+            // VARIANT MAPPING
+            // =========================
+            item.variants = item.variants.map((variant) => {
+                // Ratings calculation
+                const totalReviews = variant.reviews.length;
+                const averageRating = totalReviews > 0
+                    ? Number(
+                        (
+                            variant.reviews.reduce(
+                                (sum, review) => sum + review.rating,
+                                0
+                            ) / totalReviews
+                        ).toFixed(1)
+                    )
+                    : null;
+
+                // Dynamic Cart & Wishlist Flags
+                const isAddedToCart = userCartVariantIds.has(variant.id);
+                // True if the specific variant is wishlisted OR if the whole product is wishlisted
+                const isAddedToWishlist = userWishlistVariantIds.has(variant.id) || userWishlistProductIds.has(item.id);
+
+                return {
+                    ...variant,
+                    averageRating,
+                    totalReviews,
+                    isAddedToCart,
+                    isAddedToWishlist
+                };
+            });
 
             return res.status(200).json({
                 success: true,
@@ -752,18 +836,14 @@ customerInventoryRouter.get(
             });
 
         } catch (err) {
-
             console.error(err);
-
             return res.status(500).json({
                 success: false,
                 message: "Something went wrong"
             });
-
         }
     }
 );
-
 
 customerInventoryRouter.get('/categories', (req, res, next) => {
     if (req.headers.authorization) {
