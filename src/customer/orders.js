@@ -201,8 +201,56 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
 /**
  * Get all orders of customer
  */
+// customerOrdersRouter.get('/', customerMiddleware, async (req, res) => {
+//     try {
+//         const orders = await prisma.order.findMany({
+//             where: { customerId: req.customerid },
+//             orderBy: { createdAt: 'desc' },
+//             include: {
+//                 orderItems: {
+//                     include: {
+//                         item: { select: { title: true, images: true } },
+//                         variant: { select: { name: true, mrp: true, images: true } }
+//                     }
+//                 },
+//                 shopkeeper: { select: { shopname: true } },
+//             }
+//         });
+
+//         // Trim to only needed fields
+//         const shaped = orders.map(o => ({
+//             id: o.id,
+//             paymentType: o.paymentType,
+//             grandTotal: o.grandTotal,
+//             status: o.status,
+//             createdAt: o.createdAt,
+//             shopkeeper: o.shopkeeper,
+//             orderItems: o.orderItems.map(oi => ({
+//                 variant: oi.variant
+//             })),
+//         }));
+
+//         res.json({ success: true, orders: shaped });
+//     } catch (err) {
+//         console.log(err);
+//         res.status(500).json({ success: false, message: "Internal Server Error" });
+//     }
+// });
+
+
 customerOrdersRouter.get('/', customerMiddleware, async (req, res) => {
     try {
+        // 1. Get the userId associated with this customer
+        const customer = await prisma.customer.findUnique({
+            where: { id: req.customerid },
+            select: { userid: true }
+        });
+
+        if (!customer) {
+            return res.status(404).json({ success: false, message: "Customer not found" });
+        }
+
+        // 2. Fetch the orders and include the averageRating from the variant
         const orders = await prisma.order.findMany({
             where: { customerId: req.customerid },
             orderBy: { createdAt: 'desc' },
@@ -210,14 +258,48 @@ customerOrdersRouter.get('/', customerMiddleware, async (req, res) => {
                 orderItems: {
                     include: {
                         item: { select: { title: true, images: true } },
-                        variant: { select: { name: true, mrp: true, images: true } }
+                        variant: {
+                            select: {
+                                id: true,
+                                name: true,
+                                mrp: true,
+                                images: true,
+                                averageRating: true, // Item's overall average rating
+                                totalReviews: true
+                            }
+                        }
                     }
                 },
                 shopkeeper: { select: { shopname: true } },
             }
         });
 
-        // Trim to only needed fields
+        if (!orders.length) {
+            return res.json({ success: true, orders: [] });
+        }
+
+        // 3. Extract order IDs to fetch user's reviews for these specific orders
+        const orderIds = orders.map(o => o.id);
+
+        const userReviews = await prisma.review.findMany({
+            where: {
+                userId: customer.userid,
+                orderId: { in: orderIds }
+            },
+            select: {
+                orderId: true,
+                variantId: true,
+                rating: true
+            }
+        });
+
+        // 4. Create a quick lookup map: Key = `${orderId}_${variantId}` -> Value = rating
+        const reviewMap = new Map();
+        userReviews.forEach(review => {
+            reviewMap.set(`${review.orderId}_${review.variantId}`, review.rating);
+        });
+
+        // 5. Trim to only needed fields and append the rating data
         const shaped = orders.map(o => ({
             id: o.id,
             paymentType: o.paymentType,
@@ -225,17 +307,32 @@ customerOrdersRouter.get('/', customerMiddleware, async (req, res) => {
             status: o.status,
             createdAt: o.createdAt,
             shopkeeper: o.shopkeeper,
-            orderItems: o.orderItems.map(oi => ({
-                variant: oi.variant
-            })),
+            orderItems: o.orderItems.map(oi => {
+
+                // Check if the user reviewed this specific variant in this specific order
+                const myRating = reviewMap.get(`${o.id}_${oi.variant.id}`);
+
+                return {
+                    // I've included the item title/images here since you queried them but dropped them in your original map. 
+                    // Remove `item: oi.item` if you strictly only want the variant object.
+                    item: oi.item,
+                    variant: oi.variant,
+
+                    // New Fields
+                    isRatedByMe: !!myRating,
+                    myRating: myRating || null,
+                    averageRating: oi.variant.averageRating // Overall variant rating
+                };
+            }),
         }));
 
         res.json({ success: true, orders: shaped });
     } catch (err) {
-        console.log(err);
+        console.error(err);
         res.status(500).json({ success: false, message: "Internal Server Error" });
     }
 });
+
 
 /**
  * Get single order

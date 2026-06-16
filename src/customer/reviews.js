@@ -136,15 +136,15 @@ customerReviewsRouter.post(
             });
         }
 
-        if (
-            !description ||
-            !String(description).trim()
-        ) {
-            return res.status(400).json({
-                success: false,
-                message: 'description is required'
-            });
-        }
+        // if (
+        //     !description ||
+        //     !String(description).trim()
+        // ) {
+        //     return res.status(400).json({
+        //         success: false,
+        //         message: 'description is required'
+        //     });
+        // }
 
         try {
 
@@ -289,7 +289,7 @@ customerReviewsRouter.post(
 
                         title: title || null,
 
-                        body: String(description).trim(),
+                        ...(description ? { body: String(description).trim() } : {}),
 
                         imageUrls:
                             parseImageUrls(imageUrls),
