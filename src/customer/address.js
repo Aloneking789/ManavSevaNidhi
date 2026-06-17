@@ -59,16 +59,16 @@ addressRouter.put('/update/:id', customerMiddleware, async (req, res) => {
     try {
         // 1. Verify the address exists AND belongs to the authenticated customer
         const existingAddress = await prisma.address.findFirst({
-            where: { 
+            where: {
                 id: addressId,
                 customerid // Adjust this field name if your Prisma relation uses a different key
             }
         });
 
         if (!existingAddress) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "Address not found or unauthorized" 
+            return res.status(404).json({
+                success: false,
+                message: "Address not found or unauthorized"
             });
         }
 
@@ -78,7 +78,7 @@ addressRouter.put('/update/:id', customerMiddleware, async (req, res) => {
         if (state !== undefined) updateData.state = state;
         if (pincode !== undefined) updateData.pincode = pincode;
         if (flatnumber !== undefined) updateData.flatnumber = flatnumber;
-        
+
         if (latitude !== undefined && latitude !== null) {
             updateData.latitude = parseFloat(latitude);
         }
@@ -97,10 +97,10 @@ addressRouter.put('/update/:id', customerMiddleware, async (req, res) => {
         console.error(err);
         // Handle Prisma unique constraint error (if applicable for addresses)
         if (err && err.code === 'P2002') {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Unique constraint failed', 
-                details: err.meta 
+            return res.status(400).json({
+                success: false,
+                message: 'Unique constraint failed',
+                details: err.meta
             });
         }
         res.status(500).json({ success: false, message: "Something went wrong" });

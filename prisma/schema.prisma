@@ -471,6 +471,7 @@ enum CustomerType {
 enum PaymentType {
   COD
   CASH
+  ONLINE
 }
 
 model User {
