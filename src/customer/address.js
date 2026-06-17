@@ -61,7 +61,7 @@ addressRouter.put('/update/:id', customerMiddleware, async (req, res) => {
         const existingAddress = await prisma.address.findFirst({
             where: { 
                 id: addressId,
-                customerId: customerid // Adjust this field name if your Prisma relation uses a different key
+                customerid // Adjust this field name if your Prisma relation uses a different key
             }
         });
 
