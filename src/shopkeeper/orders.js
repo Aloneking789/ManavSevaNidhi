@@ -89,9 +89,9 @@ async function transitionOrder(req, res, options) {
     }
 
     const cancelReason = req.body?.cancelReason || defaultCancelReason;
-    if (requireCancelReason && !String(cancelReason || '').trim()) {
-      return res.status(400).json({ success: false, message: 'cancelReason is required' });
-    }
+    // if (requireCancelReason && !String(cancelReason || '').trim()) {
+    //   return res.status(400).json({ success: false, message: 'cancelReason is required' });
+    // }
 
     const result = await prisma.$transaction(async (tx) => {
       if (reserveStock) {

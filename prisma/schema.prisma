@@ -335,7 +335,7 @@ model Order {
   shopkeeper   Shopkeeper  @relation(fields: [shopkeeperId], references: [id])
   shopkeeperId String
   paymentType  PaymentType
-  orderItems   OrderItem[] // RENAMED from `items`
+  orderItems   OrderItem[]
 
   discountAmount Decimal @default(0) @db.Decimal(10, 2)
   shippingCharge Decimal @default(0) @db.Decimal(10, 2)
@@ -352,7 +352,7 @@ model Order {
   cancelledAt  DateTime?
   cancelReason String?
 
-  status            OrderStatus    @default(PROCESSING)
+  status            OrderStatus    @default(CONFIRMED)
   deliveryAddress   Address?       @relation(fields: [deliveryAddressId], references: [id]) // NEW
   deliveryAddressId String? // NEW
   createdAt         DateTime       @default(now())
@@ -451,9 +451,9 @@ model InventoryLog {
 }
 
 enum OrderStatus {
+  PROCESSING
   PENDING
   CONFIRMED
-  PROCESSING
   SHIPPED
   OUT_FOR_DELIVERY
   DELIVERED
