@@ -68,7 +68,7 @@ async function createOrderFromCart({
                     }
                 },
 
-                paymentType : "CASH",
+                paymentType: "ONLINE",
 
                 discountAmount,
 
