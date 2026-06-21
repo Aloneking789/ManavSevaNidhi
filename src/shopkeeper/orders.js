@@ -138,29 +138,65 @@ async function transitionOrder(req, res, options) {
 
 shopkeeperOrdersRouter.get('/', shopkeeperMiddleware, async (req, res) => {
   try {
-    const orders = await prisma.order.findMany({
-      where: { shopkeeperId: req.shopkeeperid },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        customer: {
-          select: {
-            id: true,
-            user: { select: { id: true, name: true, phone: true, email: true, profileimage: true, avatar: true } }
-          }
-        },
-        orderItems: {
-          include: {
-            item: { select: { title: true, unit: true, images: true } },
-            variant: { select: { id: true, name: true, sku: true, mrp: true, sellingPrice: true, stockQty: true } }
-          }
-        },
-        deliveryAddress: { select: { city: true, state: true, pincode: true, flatnumber: true } }
+    // 1. Extract query parameters with defaults
+    const { page = 1, limit = 10, status } = req.query;
+    const shopkeeperId = await req.shopkeeperid; // Await if necessary based on your middleware setup
+
+    // 2. Parse pagination values safely
+    const pageNumber = Math.max(1, parseInt(page, 10) || 1);
+    const pageSize = Math.max(1, parseInt(limit, 10) || 10);
+    const skip = (pageNumber - 1) * pageSize;
+
+    // 3. Build the dynamic where clause
+    const whereClause = {
+      shopkeeperId: shopkeeperId,
+    };
+
+    // If a status is passed in the query (?status=PENDING), add it to the filter
+    if (status) {
+      whereClause.status = String(status).toUpperCase();
+    }
+
+    // 4. Fetch total count and paginated orders in parallel for performance
+    const [totalOrders, orders] = await Promise.all([
+      prisma.order.count({ where: whereClause }),
+      prisma.order.findMany({
+        where: whereClause,
+        skip: skip,
+        take: pageSize,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          customer: {
+            select: {
+              id: true,
+              user: { select: { id: true, name: true, phone: true, email: true, profileimage: true, avatar: true } }
+            }
+          },
+          orderItems: {
+            include: {
+              item: { select: { title: true, unit: true, images: true } },
+              variant: { select: { id: true, name: true, sku: true, mrp: true, sellingPrice: true, stockQty: true } }
+            }
+          },
+          deliveryAddress: { select: { city: true, state: true, pincode: true, flatnumber: true } }
+        }
+      })
+    ]);
+
+    // 5. Return data along with pagination metadata
+    res.json({
+      success: true,
+      orders,
+      pagination: {
+        total: totalOrders,
+        page: pageNumber,
+        limit: pageSize,
+        totalPages: Math.ceil(totalOrders / pageSize),
       }
     });
 
-    res.json({ success: true, orders });
   } catch (err) {
-    console.log(err);
+    console.error('Fetch shopkeeper orders error:', err);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 });

@@ -261,6 +261,7 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.any(), async (req, re
     // Accepts file uploads (`images`) or JSON `images` array in body.
     const shopkeeperid = await req.shopkeeperid;
     const payload = req.body;
+    console.log(payload)
     try {
 
         // if (!payload.variants || payload.variants.length === 0) {
@@ -1029,31 +1030,102 @@ inventoryRouter.get('/products/:id/variants', shopkeeperMiddleware, async (req, 
 // NOTE: Product creation is handled by POST /item (supports file uploads or images array).
 
 // Update product
-inventoryRouter.put('/admin/products/:id', shopkeeperMiddleware, async (req, res) => {
-    const { id } = req.params;
-    const shopkeeperid = await req.shopkeeperid;
-    const data = req.body;
-    try {
-        const existing = await prisma.item.findUnique({ where: { id } });
-        if (!existing) return res.status(404).json({ success: false, message: 'Product not found' });
-        if (existing.shopkeeperId !== shopkeeperid) return res.status(403).json({ success: false, message: 'Not authorized' });
+inventoryRouter.put(
+    "/admin/products/:id",
+    shopkeeperMiddleware,
+    upload.any(),
+    async (req, res) => {
+        const { id } = req.params;
+        const shopkeeperid = await req.shopkeeperid;
+        const data = req.body;
 
-        const updateData = {};
-        const writable = ['title', 'images', 'unit', 'isFeatured', 'isBestSeller', 'howToUse', 'slug', 'shortDescription', 'isActive', 'benefits', 'skinType', 'minimumpurchase', 'description', 'isBundle', 'metaTitle', 'metaDesc', 'tags', 'warranty', 'availability', 'addons', 'categoryId'];
-        for (const k of writable) if (data[k] !== undefined) updateData[k] = data[k];
+        // Helper to safely convert comma-separated strings into Prisma arrays
+        // Helper to safely convert strings or stringified JSON into Prisma arrays
+        const stringToArray = (val) => {
+            if (!val) return [];
+            if (Array.isArray(val)) return val;
 
-        // If title changed and no slug provided, generate a unique slug
-        if (data.title && updateData.slug === undefined) {
-            updateData.slug = await makeUniqueItemSlug(data.title);
+            if (typeof val === 'string') {
+                try {
+                    // 1. Try your method: parsing it as a JSON array
+                    const parsed = JSON.parse(val);
+                    if (Array.isArray(parsed)) return parsed;
+
+                    // If it parsed successfully but isn't an array, wrap it in an array
+                    return [parsed];
+                } catch (error) {
+                    // 2. Fallback: If JSON.parse fails (meaning it's just a regular string like "A, B"), split by comma
+                    return val.split(',').map(item => item.trim()).filter(Boolean);
+                }
+            }
+
+            return [];
+        };
+
+        try {
+            const files = req.files || [];
+
+            const mainImageFiles = files.filter(
+                file => file.fieldname === "images"
+            );
+
+            let imageUrls;
+
+            if (mainImageFiles.length > 0) {
+                if (mainImageFiles.length > 5) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Maximum 5 images allowed"
+                    });
+                }
+                imageUrls = await uploadImageBuffers(mainImageFiles);
+            }
+
+            const existing = await prisma.item.findUnique({ where: { id } });
+            if (!existing) return res.status(404).json({ success: false, message: 'Product not found' });
+            if (existing.shopkeeperId !== shopkeeperid) return res.status(403).json({ success: false, message: 'Not authorized' });
+
+            const updateData = {};
+
+            // 1. Handle standard string fields
+            const stringFields = ['title', 'unit', 'howToUse', 'slug', 'shortDescription', 'description', 'metaTitle', 'metaDesc', 'warranty', 'availability', 'categoryId'];
+            for (const k of stringFields) {
+                if (data[k] !== undefined) updateData[k] = data[k];
+            }
+
+            // 2. Handle array fields (THE FIX)
+            const arrayFields = ['benefits', 'skinType', 'tags', 'addons']; // Added addons assuming it's also an array
+            for (const k of arrayFields) {
+                if (data[k] !== undefined) {
+                    updateData[k] = stringToArray(data[k]);
+                }
+            }
+
+            // 3. Handle Boolean and Number fields from FormData (Prevents future Prisma errors)
+            if (data.isFeatured !== undefined) updateData.isFeatured = data.isFeatured === 'true';
+            if (data.isBestSeller !== undefined) updateData.isBestSeller = data.isBestSeller === 'true';
+            if (data.isActive !== undefined) updateData.isActive = data.isActive === 'true';
+            if (data.isBundle !== undefined) updateData.isBundle = data.isBundle === 'true';
+            if (data.minimumpurchase !== undefined) updateData.minimumpurchase = parseInt(data.minimumpurchase, 10);
+
+            // 4. Handle Images
+            if (imageUrls) {
+                updateData.images = imageUrls;
+            }
+
+            // 5. Handle Slug creation
+            if (data.title && updateData.slug === undefined) {
+                updateData.slug = await makeUniqueItemSlug(data.title);
+            }
+
+            const updated = await prisma.item.update({ where: { id }, data: updateData });
+            res.json({ success: true, product: updated });
+
+        } catch (err) {
+            console.error('Admin update product error', err);
+            res.status(500).json({ success: false, message: 'Failed to update product' });
         }
-
-        const updated = await prisma.item.update({ where: { id }, data: updateData });
-        res.json({ success: true, product: updated });
-    } catch (err) {
-        console.error('Admin update product error', err);
-        res.status(500).json({ success: false, message: 'Failed to update product' });
-    }
-});
+    });
 
 // Delete product
 inventoryRouter.delete('/products/:id', shopkeeperMiddleware, async (req, res) => {
@@ -1125,45 +1197,69 @@ inventoryRouter.post('/admin/products/:id/variants', shopkeeperMiddleware, async
     }
 });
 
-inventoryRouter.put('/admin/products/:id/variants/:variantId', shopkeeperMiddleware, async (req, res) => {
-    const { id, variantId } = req.params;
-    const shopkeeperid = await req.shopkeeperid;
-    const v = req.body;
-    try {
-        const product = await prisma.item.findUnique({ where: { id } });
-        if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
-        if (product.shopkeeperId !== shopkeeperid) return res.status(403).json({ success: false, message: 'Not authorized' });
+inventoryRouter.put(
+    "/admin/products/:id/variants/:variantId",
+    shopkeeperMiddleware,
+    upload.any(),
+    async (req, res) => {
+        const { id, variantId } = req.params;
+        const shopkeeperid = await req.shopkeeperid;
+        const v = req.body;
+        try {
 
-        const existing = await prisma.productVariant.findUnique({ where: { id: variantId } });
-        if (!existing) return res.status(404).json({ success: false, message: 'Variant not found' });
-        if (existing.productId !== id) return res.status(400).json({ success: false, message: 'Variant does not belong to product' });
+            const files = req.files || [];
 
-        const updateData = {};
-        if (v.name !== undefined) updateData.name = v.name;
-        if (v.sku !== undefined) updateData.sku = v.sku;
-        if (v.mrp !== undefined) updateData.mrp = parseFloat(v.mrp);
-        if (v.sellingPrice !== undefined) updateData.sellingPrice = parseFloat(v.sellingPrice);
-        if (v.costPrice !== undefined) updateData.costPrice = parseFloat(v.costPrice);
-        if (v.weight !== undefined) updateData.weight = parseFloat(v.weight);
-        if (v.volume !== undefined) updateData.volume = parseFloat(v.volume);
-        if (v.stockQty !== undefined) updateData.stockQty = parseInt(v.stockQty);
-        if (v.lowStockAlert !== undefined) updateData.lowStockAlert = parseInt(v.lowStockAlert);
-        if (v.isDefault !== undefined) updateData.isDefault = !!v.isDefault;
-        if (v.isActive !== undefined) updateData.isActive = !!v.isActive;
-        if (v.sortOrder !== undefined) updateData.sortOrder = parseInt(v.sortOrder);
+            const variantImageFiles = files.filter(
+                file => file.fieldname === "images"
+            );
 
-        // If setting this variant as default, unset other defaults
-        if (v.isDefault) {
-            await prisma.productVariant.updateMany({ where: { productId: id, isDefault: true }, data: { isDefault: false } });
+            let uploadedImages;
+
+            if (variantImageFiles.length > 0) {
+
+                uploadedImages = await uploadImageBuffers(
+                    variantImageFiles
+                );
+            }
+
+            const product = await prisma.item.findUnique({ where: { id } });
+            if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+            if (product.shopkeeperId !== shopkeeperid) return res.status(403).json({ success: false, message: 'Not authorized' });
+
+            const existing = await prisma.productVariant.findUnique({ where: { id: variantId } });
+            if (!existing) return res.status(404).json({ success: false, message: 'Variant not found' });
+            if (existing.productId !== id) return res.status(400).json({ success: false, message: 'Variant does not belong to product' });
+
+            const updateData = {};
+
+            if (uploadedImages) {
+                updateData.images = uploadedImages;
+            }
+            if (v.name !== undefined) updateData.name = v.name;
+            if (v.sku !== undefined) updateData.sku = v.sku;
+            if (v.mrp !== undefined) updateData.mrp = parseFloat(v.mrp);
+            if (v.sellingPrice !== undefined) updateData.sellingPrice = parseFloat(v.sellingPrice);
+            if (v.costPrice !== undefined) updateData.costPrice = parseFloat(v.costPrice);
+            if (v.weight !== undefined) updateData.weight = parseFloat(v.weight);
+            if (v.volume !== undefined) updateData.volume = parseFloat(v.volume);
+            if (v.stockQty !== undefined) updateData.stockQty = parseInt(v.stockQty);
+            if (v.lowStockAlert !== undefined) updateData.lowStockAlert = parseInt(v.lowStockAlert);
+            if (v.isDefault !== undefined) updateData.isDefault = !!v.isDefault;
+            if (v.isActive !== undefined) updateData.isActive = !!v.isActive;
+            if (v.sortOrder !== undefined) updateData.sortOrder = parseInt(v.sortOrder);
+
+            // If setting this variant as default, unset other defaults
+            if (v.isDefault) {
+                await prisma.productVariant.updateMany({ where: { productId: id, isDefault: true }, data: { isDefault: false } });
+            }
+
+            const updated = await prisma.productVariant.update({ where: { id: variantId }, data: updateData });
+            res.json({ success: true, variant: updated });
+        } catch (err) {
+            console.error('Update variant error', err);
+            res.status(500).json({ success: false, message: 'Failed to update variant' });
         }
-
-        const updated = await prisma.productVariant.update({ where: { id: variantId }, data: updateData });
-        res.json({ success: true, variant: updated });
-    } catch (err) {
-        console.error('Update variant error', err);
-        res.status(500).json({ success: false, message: 'Failed to update variant' });
-    }
-});
+    });
 
 inventoryRouter.delete('/admin/products/:id/variants/:variantId', shopkeeperMiddleware, async (req, res) => {
     const { id, variantId } = req.params;
