@@ -198,6 +198,7 @@ async function getItemCount(customerId) {
         return { _count: { items: 0 } };
     }
 
+    
     const cart = await prisma.cart.findUnique({
         where: { userId: customer.userid },
         select: {
