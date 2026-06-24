@@ -193,11 +193,12 @@ async function getItemCount(customerId) {
         select: { userid: true }
     });
 
+    // If customer doesn't exist, return a default zero count object
     if (!customer) {
-        return null;
+        return { _count: { items: 0 } };
     }
 
-    return prisma.cart.findUnique({
+    const cart = await prisma.cart.findUnique({
         where: { userId: customer.userid },
         select: {
             _count: {
@@ -207,6 +208,9 @@ async function getItemCount(customerId) {
             },
         },
     });
+
+    // If the cart doesn't exist yet, return a safe fallback object
+    return cart || { _count: { items: 0 } };
 }
 
 function shapeCart(cart) {
