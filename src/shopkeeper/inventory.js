@@ -449,7 +449,7 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.any(), async (req, re
                     mrp: v.mrp !== undefined ? parseFloat(v.mrp) : (v.price !== undefined ? parseFloat(v.price) : 0),
                     sellingPrice: v.sellingPrice !== undefined ? parseFloat(v.sellingPrice) : (v.price !== undefined ? parseFloat(v.price) : 0),
                     costPrice: v.costPrice !== undefined ? parseFloat(v.costPrice) : undefined,
-                    weight: v.weight !== undefined ? parseFloat(v.weight) : undefined,
+                    weight: v.weight !== undefined ? String(v.weight) : undefined,
                     volume: v.volume !== undefined ? parseFloat(v.volume) : undefined,
                     stockQty: v.stockQty !== undefined ? parseInt(v.stockQty) : 0,
                     lowStockAlert: v.lowStockAlert !== undefined ? parseInt(v.lowStockAlert) : 10,
@@ -684,7 +684,7 @@ inventoryRouter.put('/item/:id', shopkeeperMiddleware, upload.array('images', 5)
                             mrp: v.mrp !== undefined ? parseFloat(v.mrp) : (v.price !== undefined ? parseFloat(v.price) : 0),
                             sellingPrice: v.sellingPrice !== undefined ? parseFloat(v.sellingPrice) : (v.price !== undefined ? parseFloat(v.price) : 0),
                             costPrice: v.costPrice !== undefined ? parseFloat(v.costPrice) : undefined,
-                            weight: v.weight !== undefined ? parseFloat(v.weight) : undefined,
+                            weight: v.weight !== undefined ? String(v.weight) : undefined,
                             volume: v.volume !== undefined ? parseFloat(v.volume) : undefined,
                             stockQty: v.stockQty !== undefined ? parseInt(v.stockQty) : 0,
                             lowStockAlert: v.lowStockAlert !== undefined ? parseInt(v.lowStockAlert) : 10,
@@ -1181,7 +1181,7 @@ inventoryRouter.post('/admin/products/:id/variants', shopkeeperMiddleware, async
                 mrp: v.mrp !== undefined ? parseFloat(v.mrp) : (v.price !== undefined ? parseFloat(v.price) : 0),
                 sellingPrice: v.sellingPrice !== undefined ? parseFloat(v.sellingPrice) : (v.price !== undefined ? parseFloat(v.price) : 0),
                 costPrice: v.costPrice !== undefined ? parseFloat(v.costPrice) : undefined,
-                weight: v.weight !== undefined ? parseFloat(v.weight) : undefined,
+                weight: v.weight !== undefined ? String(v.weight) : undefined,
                 volume: v.volume !== undefined ? parseFloat(v.volume) : undefined,
                 stockQty: v.stockQty !== undefined ? parseInt(v.stockQty) : 0,
                 lowStockAlert: v.lowStockAlert !== undefined ? parseInt(v.lowStockAlert) : 10,
@@ -1240,7 +1240,7 @@ inventoryRouter.put(
             if (v.mrp !== undefined) updateData.mrp = parseFloat(v.mrp);
             if (v.sellingPrice !== undefined) updateData.sellingPrice = parseFloat(v.sellingPrice);
             if (v.costPrice !== undefined) updateData.costPrice = parseFloat(v.costPrice);
-            if (v.weight !== undefined) updateData.weight = parseFloat(v.weight);
+            if (v.weight !== undefined) updateData.weight = String(v.weight);
             if (v.volume !== undefined) updateData.volume = parseFloat(v.volume);
             if (v.stockQty !== undefined) updateData.stockQty = parseInt(v.stockQty);
             if (v.lowStockAlert !== undefined) updateData.lowStockAlert = parseInt(v.lowStockAlert);

@@ -400,7 +400,7 @@ model ProductVariant {
   mrp           Decimal  @db.Decimal(10, 2)
   sellingPrice  Decimal  @db.Decimal(10, 2)
   costPrice     Decimal? @db.Decimal(10, 2)
-  weight        Float?
+  weight        String?
   volume        Float?
   stockQty      Int      @default(0)
   lowStockAlert Int      @default(10)

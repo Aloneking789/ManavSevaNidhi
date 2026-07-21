@@ -63,6 +63,22 @@ const publicItemSelect = {
         }
     },
 
+    //add seller information
+    shopkeeper: {
+        select: {
+            id: true,
+            shopname: true,
+            shopaddress: {
+                select: {
+                    city: true,
+                    state: true,
+                    pincode: true
+                }
+            }
+        }
+    },
+
+
     // ONLY REQUIRED FOR PRICE CALCULATION
 
     variants: {
@@ -742,6 +758,31 @@ customerInventoryRouter.get(
                             metaTitle: true,
                             metaDesc: true,
                             createdAt: true
+                        }
+                    },
+                    shopkeeper: {
+                        select: {
+                            id: true,
+                            shopname: true,
+                            shopaddress: {
+                                select: {
+                                    id: true,
+                                    city: true,
+                                    state: true,
+                                    pincode: true,
+                                    flatnumber: true,
+                                    latitude: true,
+                                    longitude: true
+                                }
+                            },
+                            user: {
+                                select: {
+                                    name: true,
+                                    email: true,
+                                    phone: true,
+                                    profileimage: true
+                                }
+                            }
                         }
                     }
                 }
