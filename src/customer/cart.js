@@ -173,7 +173,7 @@ async function loadCart(customerId) {
         return null;
     }
 
-    return prisma.cart.findUnique({
+    let cart = await prisma.cart.findUnique({
         where: { userId: customer.userid },
         include: {
             coupon: true,
@@ -186,6 +186,51 @@ async function loadCart(customerId) {
             }
         }
     });
+
+    if (cart && cart.coupon) {
+        let isApplicable = true;
+
+        // Check standard validations (status, dates, usage limit, minOrderAmount)
+        const subtotal = cart.items.reduce((sum, item) => sum + (Number(item.variant.sellingPrice) * item.quantity), 0);
+        const validation = isCouponValid(cart.coupon, subtotal);
+        if (!validation.valid) {
+            isApplicable = false;
+        }
+
+        // Check first order requirement
+        if (isApplicable && cart.coupon.isFirstOrder) {
+            const orderCount = await prisma.order.count({ where: { customerId } });
+            if (orderCount > 0) {
+                isApplicable = false;
+            }
+        }
+
+        // Check item/category applicability
+        if (isApplicable && !isCouponApplicableToItems(cart.coupon, cart.items)) {
+            isApplicable = false;
+        }
+
+        // Check usage limit per user
+        if (isApplicable && cart.coupon.usageLimitPerUser !== null && cart.coupon.usageLimitPerUser !== undefined) {
+            const userUsageCount = await prisma.couponUsage.count({
+                where: { couponId: cart.coupon.id, userId: customer.userid }
+            });
+            if (userUsageCount >= cart.coupon.usageLimitPerUser) {
+                isApplicable = false;
+            }
+        }
+
+        if (!isApplicable) {
+            await prisma.cart.update({
+                where: { id: cart.id },
+                data: { couponId: null }
+            });
+            cart.coupon = null;
+            cart.couponId = null;
+        }
+    }
+
+    return cart;
 }
 
 
@@ -309,12 +354,42 @@ customerCartRouter.get('/summary', customerMiddleware, async (req, res) => {
 });
 customerCartRouter.get('/count', customerMiddleware, async (req, res) => {
     try {
-        const itemCount = await getItemCount(req.customerid);
+        const customer = await prisma.customer.findUnique({
+            where: { id: req.customerid },
+            select: { userid: true }
+        });
 
+        if (!customer) {
+            return res.json({
+                success: true,
+                count: 0,
+                wishlistCount: 0
+            });
+        }
+
+        const [cart, wishlist] = await Promise.all([
+            prisma.cart.findUnique({
+                where: { userId: customer.userid },
+                select: {
+                    _count: {
+                        select: { items: true }
+                    }
+                }
+            }),
+            prisma.wishlist.findUnique({
+                where: { userId: customer.userid },
+                select: {
+                    _count: {
+                        select: { items: true }
+                    }
+                }
+            })
+        ]);
 
         return res.json({
             success: true,
-            count: itemCount._count.items
+            count: cart?._count.items || 0,
+            wishlistCount: wishlist?._count.items || 0
         });
     } catch (err) {
         console.error(err);
