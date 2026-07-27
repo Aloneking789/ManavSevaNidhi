@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { prisma } from '../../config/prismaConfig.js';
 import { customerMiddleware } from "../../middlewares/customerAuth.js";
+import { getUserCartAndWishlistSets } from "./utils.js";
+
 
 
 export const customerInventoryRouter = Router();
@@ -114,11 +116,17 @@ const publicItemSelect = {
 
 customerInventoryRouter.get(
     '/items/search',
-
+    (req, res, next) => {
+        if (req.headers.authorization) {
+            return customerMiddleware(req, res, next);
+        }
+        next();
+    },
     async (req, res) => {
 
         try {
 
+            const { userCartVariantIds, userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
 
             const {
                 q,
@@ -294,37 +302,28 @@ customerInventoryRouter.get(
 
             const variantResults =
                 filteredVariants.map(
-                    variant => ({
-
-                        id: variant.product.id,
-
-                        title: variant.product.title,
-
-                        slug: variant.product.slug,
-
-                        images:
-                            variant.product.images,
-
-                        shortDescription:
-                            variant.product
-                                .shortDescription,
-
-                        averageRating:
-                            variant.product
-                                .averageRating,
-
-                        totalReviews:
-                            variant.product
-                                .totalReviews,
-
-                        category:
-                            variant.product
-                                .category,
-
-                        matchedVariants: [
-                            variant
-                        ]
-                    })
+                    variant => {
+                        const isAddedToCart = userCartVariantIds.has(variant.id);
+                        const isAddedToWishlist = userWishlistVariantIds.has(variant.id) || userWishlistProductIds.has(variant.product.id);
+                        const mappedVariant = {
+                            ...variant,
+                            isAddedToCart,
+                            isAddedToWishlist
+                        };
+                        return {
+                            id: variant.product.id,
+                            title: variant.product.title,
+                            slug: variant.product.slug,
+                            images: variant.product.images,
+                            shortDescription: variant.product.shortDescription,
+                            averageRating: variant.product.averageRating,
+                            totalReviews: variant.product.totalReviews,
+                            category: variant.product.category,
+                            matchedVariants: [
+                                mappedVariant
+                            ]
+                        };
+                    }
                 );
 
             // =========================
@@ -332,13 +331,22 @@ customerInventoryRouter.get(
             // =========================
 
             const itemResults =
-                matchedItems.map(item => ({
-
-                    ...item,
-
-                    matchedVariants:
-                        item.variants
-                }));
+                matchedItems.map(item => {
+                    const mappedVariants = item.variants.map(variant => {
+                        const isAddedToCart = userCartVariantIds.has(variant.id);
+                        const isAddedToWishlist = userWishlistVariantIds.has(variant.id) || userWishlistProductIds.has(item.id);
+                        return {
+                            ...variant,
+                            isAddedToCart,
+                            isAddedToWishlist
+                        };
+                    });
+                    return {
+                        ...item,
+                        variants: mappedVariants,
+                        matchedVariants: mappedVariants
+                    };
+                });
 
             // =========================
             // FINAL RESPONSE
@@ -395,6 +403,8 @@ customerInventoryRouter.get(
 
         try {
 
+            const { userCartVariantIds, userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
+
             const items =
                 await prisma.item.findMany({
 
@@ -414,13 +424,22 @@ customerInventoryRouter.get(
                                 variant.isDefault
                         ) || null;
 
+                    let mappedDefaultVariant = null;
+                    if (defaultVariant) {
+                        mappedDefaultVariant = {
+                            ...defaultVariant,
+                            isAddedToCart: userCartVariantIds.has(defaultVariant.id),
+                            isAddedToWishlist: userWishlistVariantIds.has(defaultVariant.id) || userWishlistProductIds.has(item.id)
+                        };
+                    }
+
                     delete item.variants;
 
                     return {
 
                         ...item,
 
-                        defaultVariant
+                        defaultVariant: mappedDefaultVariant
                     };
                 });
 
@@ -798,47 +817,7 @@ customerInventoryRouter.get(
             // =========================
             // CART & WISHLIST TRACKING
             // =========================
-            const userCartVariantIds = new Set();
-            const userWishlistVariantIds = new Set();
-            const userWishlistProductIds = new Set();
-
-            // If the user is authenticated, req.customerid should be available
-            if (req.customerid) {
-                // Find the user ID associated with this customer profile
-                const customer = await prisma.customer.findUnique({
-                    where: { id: req.customerid },
-                    select: { userid: true }
-                });
-
-                if (customer) {
-                    const userId = customer.userid;
-
-                    // Fetch user's cart items
-                    const cart = await prisma.cart.findUnique({
-                        where: { userId },
-                        select: { items: { select: { variantId: true } } }
-                    });
-
-                    if (cart) {
-                        cart.items.forEach(ci => userCartVariantIds.add(ci.variantId));
-                    }
-
-                    // Fetch user's wishlist items
-                    const wishlist = await prisma.wishlist.findUnique({
-                        where: { userId },
-                        select: { items: { select: { productId: true, variantId: true } } }
-                    });
-
-                    if (wishlist) {
-                        wishlist.items.forEach(wi => {
-                            userWishlistProductIds.add(wi.productId);
-                            if (wi.variantId) {
-                                userWishlistVariantIds.add(wi.variantId);
-                            }
-                        });
-                    }
-                }
-            }
+            const { userCartVariantIds, userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
 
             // =========================
             // VARIANT MAPPING
@@ -959,6 +938,8 @@ customerInventoryRouter.get(
 
         try {
 
+            const { userCartVariantIds, userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
+
             const items =
                 await prisma.item.findMany({
 
@@ -985,13 +966,22 @@ customerInventoryRouter.get(
                                 variant.isDefault
                         ) || null;
 
+                    let mappedDefaultVariant = null;
+                    if (defaultVariant) {
+                        mappedDefaultVariant = {
+                            ...defaultVariant,
+                            isAddedToCart: userCartVariantIds.has(defaultVariant.id),
+                            isAddedToWishlist: userWishlistVariantIds.has(defaultVariant.id) || userWishlistProductIds.has(item.id)
+                        };
+                    }
+
                     delete item.variants;
 
                     return {
 
                         ...item,
 
-                        defaultVariant
+                        defaultVariant: mappedDefaultVariant
                     };
                 });
 

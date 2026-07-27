@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { prisma } from '../../config/prismaConfig.js';
 import { customerMiddleware } from "../../middlewares/customerAuth.js";
+import { getUserCartAndWishlistSets } from "./utils.js";
+
 
 export const wishlistRouter = Router();
 
@@ -37,19 +39,32 @@ async function loadWishlist(userId) {
     });
 }
 
-function shapeWishlist(wishlist) {
+function shapeWishlist(wishlist, userCartVariantIds = new Set(), userWishlistVariantIds = new Set(), userWishlistProductIds = new Set()) {
     if (!wishlist) {
         return { id: null, items: [], itemCount: 0 };
     }
 
     return {
         id: wishlist.id,
-        items: wishlist.items.map((item) => ({
-            id: item.id,
-            createdAt: item.createdAt,
-            product: item.product,
-            variant: item.variant
-        })),
+        items: wishlist.items.map((item) => {
+            const variant = item.variant ? {
+                ...item.variant,
+                isAddedToCart: userCartVariantIds.has(item.variant.id),
+                isAddedToWishlist: true
+            } : null;
+
+            const product = item.product ? {
+                ...item.product,
+                isAddedToWishlist: true
+            } : null;
+
+            return {
+                id: item.id,
+                createdAt: item.createdAt,
+                product,
+                variant
+            };
+        }),
         itemCount: wishlist.items.length
     };
 }
@@ -75,7 +90,8 @@ wishlistRouter.get('/', customerMiddleware, async (req, res) => {
     try {
         const userId = await getCustomerUserId(req.customerid);
         const wishlist = await loadWishlist(userId);
-        return res.json({ success: true, wishlist: shapeWishlist(wishlist) });
+        const { userCartVariantIds, userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
+        return res.json({ success: true, wishlist: shapeWishlist(wishlist, userCartVariantIds, userWishlistVariantIds, userWishlistProductIds) });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ success: false, message: 'Something went wrong' });
@@ -115,7 +131,8 @@ wishlistRouter.post('/', customerMiddleware, async (req, res) => {
         });
 
         const updated = await loadWishlist(userId);
-        return res.status(201).json({ success: true, wishlist: shapeWishlist(updated) });
+        const { userCartVariantIds, userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
+        return res.status(201).json({ success: true, wishlist: shapeWishlist(updated, userCartVariantIds, userWishlistVariantIds, userWishlistProductIds) });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ success: false, message: 'Something went wrong' });
@@ -139,7 +156,8 @@ wishlistRouter.delete('/items/:id', customerMiddleware, async (req, res) => {
 
         await prisma.wishlistItem.delete({ where: { id } });
         const updated = await loadWishlist(userId);
-        return res.json({ success: true, wishlist: shapeWishlist(updated) });
+        const { userCartVariantIds, userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
+        return res.json({ success: true, wishlist: shapeWishlist(updated, userCartVariantIds, userWishlistVariantIds, userWishlistProductIds) });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ success: false, message: 'Something went wrong' });
@@ -242,11 +260,17 @@ wishlistRouter.post('/move-to-cart', customerMiddleware, async (req, res) => {
             };
         });
 
+        const { userCartVariantIds, userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
+
         const cartItems = result.cart.items.map((item) => ({
             id: item.id,
             quantity: item.quantity,
             product: item.product,
-            variant: item.variant,
+            variant: {
+                ...item.variant,
+                isAddedToCart: true,
+                isAddedToWishlist: userWishlistVariantIds.has(item.variant.id) || userWishlistProductIds.has(item.productId)
+            },
             lineTotal: Number(item.variant.sellingPrice) * item.quantity
         }));
 
@@ -259,7 +283,7 @@ wishlistRouter.post('/move-to-cart', customerMiddleware, async (req, res) => {
                 subtotal: cartItems.reduce((sum, item) => sum + item.lineTotal, 0),
                 itemCount: cartItems.length
             },
-            wishlist: shapeWishlist(result.wishlist)
+            wishlist: shapeWishlist(result.wishlist, userCartVariantIds, userWishlistVariantIds, userWishlistProductIds)
         });
     } catch (err) {
         console.error(err);

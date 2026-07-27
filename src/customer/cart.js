@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { prisma } from '../../config/prismaConfig.js';
 import { customerMiddleware } from "../../middlewares/customerAuth.js";
+import { getUserCartAndWishlistSets } from "./utils.js";
+
 import Razorpay from "razorpay";
 import crypto from "crypto"
 
@@ -198,7 +200,7 @@ async function getItemCount(customerId) {
         return { _count: { items: 0 } };
     }
 
-    
+
     const cart = await prisma.cart.findUnique({
         where: { userId: customer.userid },
         select: {
@@ -214,7 +216,7 @@ async function getItemCount(customerId) {
     return cart || { _count: { items: 0 } };
 }
 
-function shapeCart(cart) {
+function shapeCart(cart, userWishlistVariantIds = new Set(), userWishlistProductIds = new Set()) {
     if (!cart) {
         return { id: null, coupon: null, items: [], subtotal: 0, itemCount: 0 };
     }
@@ -224,7 +226,11 @@ function shapeCart(cart) {
         quantity: item.quantity,
         addedAt: item.addedAt,
         product: item.product,
-        variant: item.variant,
+        variant: {
+            ...item.variant,
+            isAddedToCart: true,
+            isAddedToWishlist: userWishlistVariantIds.has(item.variant.id) || userWishlistProductIds.has(item.productId)
+        },
         lineTotal: Number(item.variant.sellingPrice) * item.quantity
     }));
 
@@ -271,7 +277,8 @@ function calculateCouponDiscount(coupon, subtotal) {
 customerCartRouter.get('/', customerMiddleware, async (req, res) => {
     try {
         const cart = await loadCart(req.customerid);
-        return res.json({ success: true, cart: shapeCart(cart) });
+        const { userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
+        return res.json({ success: true, cart: shapeCart(cart, userWishlistVariantIds, userWishlistProductIds) });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ success: false, message: 'Something went wrong' });
@@ -350,7 +357,8 @@ customerCartRouter.post('/items', customerMiddleware, async (req, res) => {
         });
 
         const updatedCart = await loadCart(req.customerid);
-        return res.status(201).json({ success: true, cart: shapeCart(updatedCart) });
+        const { userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
+        return res.status(201).json({ success: true, cart: shapeCart(updatedCart, userWishlistVariantIds, userWishlistProductIds) });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ success: false, message: 'Something went wrong' });
@@ -384,7 +392,8 @@ customerCartRouter.put('/items/:variantId', customerMiddleware, async (req, res)
         await prisma.cartItem.update({ where: { cartId_variantId: { cartId: cart.id, variantId } }, data: { quantity: qty } });
 
         const updatedCart = await loadCart(req.customerid);
-        return res.json({ success: true, cart: shapeCart(updatedCart) });
+        const { userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
+        return res.json({ success: true, cart: shapeCart(updatedCart, userWishlistVariantIds, userWishlistProductIds) });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ success: false, message: 'Something went wrong' });
@@ -403,7 +412,8 @@ customerCartRouter.delete('/items/:variantId', customerMiddleware, async (req, r
         await prisma.cartItem.deleteMany({ where: { cartId: cart.id, variantId } });
 
         const updatedCart = await loadCart(req.customerid);
-        return res.json({ success: true, cart: shapeCart(updatedCart) });
+        const { userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
+        return res.json({ success: true, cart: shapeCart(updatedCart, userWishlistVariantIds, userWishlistProductIds) });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ success: false, message: 'Something went wrong' });
@@ -469,7 +479,8 @@ customerCartRouter.post('/coupon/apply', customerMiddleware, async (req, res) =>
         await prisma.cart.update({ where: { userId: customer.userid }, data: { couponId: coupon.id } });
 
         const updatedCart = await loadCart(req.customerid);
-        const shaped = shapeCart(updatedCart);
+        const { userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
+        const shaped = shapeCart(updatedCart, userWishlistVariantIds, userWishlistProductIds);
         const discount = calculateCouponDiscount(updatedCart.coupon, shaped.subtotal);
 
         return res.json({ success: true, cart: { ...shaped, discount, total: shaped.subtotal - discount } });
