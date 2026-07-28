@@ -122,6 +122,77 @@ const publicItemSelect = {
     }
 };
 
+
+const getWatchAndShopProducts = async (req, res) => {
+    try {
+        const items = await prisma.item.findMany({
+            where: {
+                isActive: true,
+                productYtLink: {
+                    not: null,
+                    notIn: ["", "null", "undefined"]
+                }
+            },
+            select: {
+                id: true,
+                title: true,
+                slug: true,
+                productYtLink: true,
+                featuredImage: true,
+                images: true,
+                variants: {
+                    where: { isActive: true },
+                    select: {
+                        id: true,
+                        name: true,
+                        mrp: true,
+                        sellingPrice: true,
+                        stockQty: true,
+                        isDefault: true
+                    }
+                }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        // Filter out empty or whitespace-only YouTube links
+        const validItems = items.filter(item => item.productYtLink && String(item.productYtLink).trim().length > 0);
+
+        const formattedItems = validItems.map((item) => {
+            const defaultVariant = item.variants.find((variant) => variant.isDefault) || item.variants[0] || null;
+            const featuredImg = item.featuredImage || (item.images && item.images.length > 0 ? item.images[0] : null);
+
+            return {
+                id: item.id,
+                title: item.title,
+                slug: item.slug,
+                productYtLink: item.productYtLink,
+                featuredImage: featuredImg,
+                defaultVariant: defaultVariant ? {
+                    id: defaultVariant.id,
+                    name: defaultVariant.name,
+                    mrp: defaultVariant.mrp,
+                    sellingPrice: defaultVariant.sellingPrice,
+                    stockQty: defaultVariant.stockQty
+                } : null
+            };
+        });
+
+        return res.status(200).json({
+            success: true,
+            count: formattedItems.length,
+            items: formattedItems
+        });
+    } catch (err) {
+        console.error('Watch and Shop error:', err);
+        return res.status(500).json({
+            success: false,
+            message: "Something went wrong"
+        });
+    }
+};
+
+customerInventoryRouter.get('/watch-and-shop', getWatchAndShopProducts);
 customerInventoryRouter.get(
     '/items/search',
     (req, res, next) => {
@@ -1017,3 +1088,6 @@ customerInventoryRouter.get(
         }
     }
 );
+
+
+

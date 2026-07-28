@@ -28,8 +28,8 @@ app.use('/api/v1/user', customerRouter)
 app.use('/api/v1/owner', shopkeeperRouter)
 
 
-app.get(/(.*)/, (req, res) => {
-  res.send("PAGE NOT FOUND");
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: "Route not found" });
 });
 
 
