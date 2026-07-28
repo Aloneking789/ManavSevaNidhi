@@ -32,6 +32,8 @@ const publicItemSelect = {
 
     images: true,
 
+    featuredImage: true,
+
     availability: true,
 
     unit: true,
@@ -45,6 +47,12 @@ const publicItemSelect = {
     addons: true,
 
     tags: true,
+
+    howToUse: true,
+
+    productHowToVidLink: true,
+
+    productYtLink: true,
 
     isFeatured: true,
 
@@ -745,10 +753,12 @@ customerInventoryRouter.get(
             // 1. Fetch the Item with its relations
             const item = await prisma.item.findFirst({
                 where: {
-                    id,
+                    OR: [{ id }, { slug: id }],
                     isActive: true
                 },
                 include: {
+                    faqs: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+                    sections: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
                     variants: {
                         include: {
                             reviews: {

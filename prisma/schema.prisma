@@ -274,10 +274,13 @@ model Item {
   id               String           @id @default(uuid())
   title            String
   images           String[]         @db.VarChar(255)
+  featuredImage    String?
   unit             Unit
   isFeatured       Boolean          @default(false)
   isBestSeller     Boolean          @default(false)
   howToUse         String?
+  productHowToVidLink String?
+  productYtLink    String?
   slug             String           @unique
   shortDescription String?
   isActive         Boolean          @default(true)
@@ -305,6 +308,35 @@ model Item {
   createdAt        DateTime         @default(now())
   cartItems        CartItem[]
   reviews          Review[]
+  faqs             ProductFaq[]
+  sections         ProductSection[]
+}
+
+model ProductFaq {
+  id        String   @id @default(cuid())
+  productId String
+  product   Item     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  question  String
+  answer    String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId])
+}
+
+model ProductSection {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Item     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  title       String
+  description String
+  imageUrl    String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([productId])
 }
 
 model ProductConcern {

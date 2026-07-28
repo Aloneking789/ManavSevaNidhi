@@ -278,23 +278,30 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.any(), async (req, re
         const files = req.files || [];
 
         // =========================
-        // MAIN PRODUCT IMAGES
+        // FEATURED & MAIN PRODUCT IMAGES
         // =========================
+
+        const featuredImageFiles = files.filter(
+            file => file.fieldname === 'featuredImage' || file.fieldname === 'featured_image' || file.fieldname === 'featuredImageFile'
+        );
+
+        let featuredImageUrl = payload.featuredImage || undefined;
+        if (featuredImageFiles.length > 0) {
+            featuredImageUrl = await uploadImageBuffer(featuredImageFiles[0].buffer);
+        }
 
         const mainImageFiles =
             files.filter(
-                file => file.fieldname === 'images'
+                file => file.fieldname === 'images' || file.fieldname === 'image'
             );
 
         let imageUrls = [];
 
         if (mainImageFiles.length > 0) {
-
             if (
                 mainImageFiles.length < 1 ||
                 mainImageFiles.length > 5
             ) {
-
                 return res.status(400).json({
                     success: false,
                     message:
@@ -306,6 +313,19 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.any(), async (req, re
                 await uploadImageBuffers(
                     mainImageFiles
                 );
+        } else if (payload.images) {
+            try {
+                imageUrls = typeof payload.images === 'string' ? JSON.parse(payload.images) : payload.images;
+                if (!Array.isArray(imageUrls)) imageUrls = [payload.images];
+            } catch (e) {
+                imageUrls = [payload.images];
+            }
+        }
+
+        if (featuredImageUrl && imageUrls.length === 0) {
+            imageUrls = [featuredImageUrl];
+        } else if (imageUrls.length > 0 && !featuredImageUrl) {
+            featuredImageUrl = imageUrls[0];
         }
 
         // =========================
@@ -353,6 +373,22 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.any(), async (req, re
                 await uploadImageBuffers(
                     variantImagesMap[index]
                 );
+        }
+
+        // =========================
+        // SECTION IMAGES MAP
+        // =========================
+
+        const sectionImageFields = files.filter(file =>
+            file.fieldname.startsWith('sectionImage_') || file.fieldname.startsWith('sectionImages_')
+        );
+
+        const uploadedSectionImages = {};
+        for (const file of sectionImageFields) {
+            const match = file.fieldname.match(/^sectionImages?_(\d+)$/);
+            if (!match) continue;
+            const secIndex = match[1];
+            uploadedSectionImages[secIndex] = await uploadImageBuffer(file.buffer);
         }
 
         // Validate category ownership if provided
@@ -415,8 +451,14 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.any(), async (req, re
             slug: slugVal,
             unit: unitVal,
             description: descVal,
+            productYtLink: payload.productYtLink || undefined,
+            productHowToVidLink: payload.productHowToVidLink || undefined,
+
+
+
             minimumpurchase: payload.minimumpurchase !== undefined ? parseInt(payload.minimumpurchase) : (payload.minimumpurchase || 0),
             images: imageUrls,
+            featuredImage: featuredImageUrl || undefined,
             availability: payload.availability,
             warranty: payload.warranty || undefined,
             addons: payload.addons ? (typeof payload.addons === 'string' ? JSON.parse(payload.addons) : payload.addons) : undefined,
@@ -460,7 +502,30 @@ inventoryRouter.post('/item', shopkeeperMiddleware, upload.any(), async (req, re
             };
         }
 
-        const item = await prisma.item.create({ data: createData });
+        const faqsData = payload.faqs ? (typeof payload.faqs === 'string' ? JSON.parse(payload.faqs) : payload.faqs) : null;
+        if (Array.isArray(faqsData) && faqsData.length > 0) {
+            createData.faqs = {
+                create: faqsData.map((faq, index) => ({
+                    question: faq.question || '',
+                    answer: faq.answer || '',
+                    sortOrder: faq.sortOrder !== undefined ? parseInt(faq.sortOrder) : index
+                }))
+            };
+        }
+
+        const sectionsData = payload.sections ? (typeof payload.sections === 'string' ? JSON.parse(payload.sections) : payload.sections) : null;
+        if (Array.isArray(sectionsData) && sectionsData.length > 0) {
+            createData.sections = {
+                create: sectionsData.map((sec, index) => ({
+                    title: sec.title || '',
+                    description: sec.description || '',
+                    imageUrl: uploadedSectionImages[index] || sec.imageUrl || null,
+                    sortOrder: sec.sortOrder !== undefined ? parseInt(sec.sortOrder) : index
+                }))
+            };
+        }
+
+        const item = await prisma.item.create({ data: createData, include: { faqs: true, sections: true, variants: true } });
         res.status(201).json({ success: true, item });
     } catch (err) {
         console.error('Create item error', err);
@@ -1000,7 +1065,11 @@ inventoryRouter.get('/item/:id', shopkeeperMiddleware, async (req, res) => {
     try {
         const item = await prisma.item.findUnique({
             where: { id },
-            include: { variants: true }
+            include: {
+                variants: true,
+                faqs: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+                sections: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] }
+            }
         });
         if (!item) return res.status(404).json({ success: false, message: 'Product not found' });
         if (item.shopkeeperId !== shopkeeperid) return res.status(403).json({ success: false, message: 'Not authorized' });
@@ -1088,9 +1157,17 @@ inventoryRouter.put(
             const updateData = {};
 
             // 1. Handle standard string fields
-            const stringFields = ['title', 'unit', 'howToUse', 'slug', 'shortDescription', 'description', 'metaTitle', 'metaDesc', 'warranty', 'availability', 'categoryId'];
+            const stringFields = ['title', 'unit', 'howToUse', 'productHowToVidLink', 'productYtLink', 'featuredImage', 'slug', 'shortDescription', 'description', 'metaTitle', 'metaDesc', 'warranty', 'availability', 'categoryId'];
             for (const k of stringFields) {
                 if (data[k] !== undefined) updateData[k] = data[k];
+            }
+
+            // Handle featuredImage file upload if provided
+            const featuredImageFiles = files.filter(
+                file => file.fieldname === 'featuredImage' || file.fieldname === 'featured_image' || file.fieldname === 'featuredImageFile'
+            );
+            if (featuredImageFiles.length > 0) {
+                updateData.featuredImage = await uploadImageBuffer(featuredImageFiles[0].buffer);
             }
 
             // 2. Handle array fields (THE FIX)
@@ -1361,5 +1438,203 @@ inventoryRouter.patch('/admin/products/:id/variants/:variantId/stock', shopkeepe
     } catch (err) {
         console.error('Update stock error', err);
         res.status(500).json({ success: false, message: 'Failed to update stock' });
+    }
+});
+
+// ==========================================
+// PRODUCT FAQs API ENDPOINTS
+// ==========================================
+
+// Add FAQ(s) to a product
+inventoryRouter.post('/item/:id/faqs', shopkeeperMiddleware, async (req, res) => {
+    const { id } = req.params;
+    const shopkeeperid = await req.shopkeeperid;
+    const { question, answer, sortOrder, faqs } = req.body;
+
+    try {
+        const item = await prisma.item.findUnique({ where: { id } });
+        if (!item) return res.status(404).json({ success: false, message: 'Product not found' });
+        if (item.shopkeeperId !== shopkeeperid) return res.status(403).json({ success: false, message: 'Not authorized' });
+
+        if (Array.isArray(faqs)) {
+            const createdFaqs = await prisma.productFaq.createMany({
+                data: faqs.map((f, idx) => ({
+                    productId: id,
+                    question: f.question,
+                    answer: f.answer,
+                    sortOrder: f.sortOrder !== undefined ? parseInt(f.sortOrder) : idx
+                }))
+            });
+            return res.status(201).json({ success: true, count: createdFaqs.count });
+        }
+
+        if (!question || !answer) {
+            return res.status(400).json({ success: false, message: 'question and answer are required' });
+        }
+
+        const faq = await prisma.productFaq.create({
+            data: {
+                productId: id,
+                question,
+                answer,
+                sortOrder: sortOrder !== undefined ? parseInt(sortOrder) : 0
+            }
+        });
+
+        res.status(201).json({ success: true, faq });
+    } catch (err) {
+        console.error('Create FAQ error', err);
+        res.status(500).json({ success: false, message: 'Failed to create FAQ' });
+    }
+});
+
+// Update an FAQ
+inventoryRouter.put('/faq/:faqId', shopkeeperMiddleware, async (req, res) => {
+    const { faqId } = req.params;
+    const shopkeeperid = await req.shopkeeperid;
+    const { question, answer, sortOrder } = req.body;
+
+    try {
+        const existingFaq = await prisma.productFaq.findUnique({
+            where: { id: faqId },
+            include: { product: true }
+        });
+        if (!existingFaq) return res.status(404).json({ success: false, message: 'FAQ not found' });
+        if (existingFaq.product.shopkeeperId !== shopkeeperid) return res.status(403).json({ success: false, message: 'Not authorized' });
+
+        const updated = await prisma.productFaq.update({
+            where: { id: faqId },
+            data: {
+                question: question !== undefined ? question : existingFaq.question,
+                answer: answer !== undefined ? answer : existingFaq.answer,
+                sortOrder: sortOrder !== undefined ? parseInt(sortOrder) : existingFaq.sortOrder
+            }
+        });
+
+        res.json({ success: true, faq: updated });
+    } catch (err) {
+        console.error('Update FAQ error', err);
+        res.status(500).json({ success: false, message: 'Failed to update FAQ' });
+    }
+});
+
+// Delete an FAQ
+inventoryRouter.delete('/faq/:faqId', shopkeeperMiddleware, async (req, res) => {
+    const { faqId } = req.params;
+    const shopkeeperid = await req.shopkeeperid;
+
+    try {
+        const existingFaq = await prisma.productFaq.findUnique({
+            where: { id: faqId },
+            include: { product: true }
+        });
+        if (!existingFaq) return res.status(404).json({ success: false, message: 'FAQ not found' });
+        if (existingFaq.product.shopkeeperId !== shopkeeperid) return res.status(403).json({ success: false, message: 'Not authorized' });
+
+        await prisma.productFaq.delete({ where: { id: faqId } });
+        res.json({ success: true, message: 'FAQ deleted successfully' });
+    } catch (err) {
+        console.error('Delete FAQ error', err);
+        res.status(500).json({ success: false, message: 'Failed to delete FAQ' });
+    }
+});
+
+// ==========================================
+// PRODUCT RICH DESCRIPTION SECTIONS API ENDPOINTS
+// ==========================================
+
+// Add a rich description section to a product (supports single image upload or imageUrl)
+inventoryRouter.post('/item/:id/section', shopkeeperMiddleware, upload.single('image'), async (req, res) => {
+    const { id } = req.params;
+    const shopkeeperid = await req.shopkeeperid;
+    const { title, description, imageUrl, sortOrder } = req.body;
+
+    try {
+        const item = await prisma.item.findUnique({ where: { id } });
+        if (!item) return res.status(404).json({ success: false, message: 'Product not found' });
+        if (item.shopkeeperId !== shopkeeperid) return res.status(403).json({ success: false, message: 'Not authorized' });
+
+        if (!title || !description) {
+            return res.status(400).json({ success: false, message: 'title and description are required' });
+        }
+
+        let finalImageUrl = imageUrl || null;
+        if (req.file) {
+            finalImageUrl = await uploadImageBuffer(req.file.buffer);
+        }
+
+        const section = await prisma.productSection.create({
+            data: {
+                productId: id,
+                title,
+                description,
+                imageUrl: finalImageUrl,
+                sortOrder: sortOrder !== undefined ? parseInt(sortOrder) : 0
+            }
+        });
+
+        res.status(201).json({ success: true, section });
+    } catch (err) {
+        console.error('Create section error', err);
+        res.status(500).json({ success: false, message: 'Failed to create product section' });
+    }
+});
+
+// Update a rich description section
+inventoryRouter.put('/section/:sectionId', shopkeeperMiddleware, upload.single('image'), async (req, res) => {
+    const { sectionId } = req.params;
+    const shopkeeperid = await req.shopkeeperid;
+    const { title, description, imageUrl, sortOrder } = req.body;
+
+    try {
+        const existingSection = await prisma.productSection.findUnique({
+            where: { id: sectionId },
+            include: { product: true }
+        });
+        if (!existingSection) return res.status(404).json({ success: false, message: 'Product section not found' });
+        if (existingSection.product.shopkeeperId !== shopkeeperid) return res.status(403).json({ success: false, message: 'Not authorized' });
+
+        let finalImageUrl = existingSection.imageUrl;
+        if (req.file) {
+            finalImageUrl = await uploadImageBuffer(req.file.buffer);
+        } else if (imageUrl !== undefined) {
+            finalImageUrl = imageUrl;
+        }
+
+        const updated = await prisma.productSection.update({
+            where: { id: sectionId },
+            data: {
+                title: title !== undefined ? title : existingSection.title,
+                description: description !== undefined ? description : existingSection.description,
+                imageUrl: finalImageUrl,
+                sortOrder: sortOrder !== undefined ? parseInt(sortOrder) : existingSection.sortOrder
+            }
+        });
+
+        res.json({ success: true, section: updated });
+    } catch (err) {
+        console.error('Update section error', err);
+        res.status(500).json({ success: false, message: 'Failed to update product section' });
+    }
+});
+
+// Delete a rich description section
+inventoryRouter.delete('/section/:sectionId', shopkeeperMiddleware, async (req, res) => {
+    const { sectionId } = req.params;
+    const shopkeeperid = await req.shopkeeperid;
+
+    try {
+        const existingSection = await prisma.productSection.findUnique({
+            where: { id: sectionId },
+            include: { product: true }
+        });
+        if (!existingSection) return res.status(404).json({ success: false, message: 'Product section not found' });
+        if (existingSection.product.shopkeeperId !== shopkeeperid) return res.status(403).json({ success: false, message: 'Not authorized' });
+
+        await prisma.productSection.delete({ where: { id: sectionId } });
+        res.json({ success: true, message: 'Product section deleted successfully' });
+    } catch (err) {
+        console.error('Delete section error', err);
+        res.status(500).json({ success: false, message: 'Failed to delete product section' });
     }
 });
