@@ -2,6 +2,8 @@ import { Router } from "express";
 import { prisma } from '../../config/prismaConfig.js' // adjust path if different
 import { customerMiddleware } from "../../middlewares/customerAuth.js";
 
+import { DEFAULT_SHIPPING_CHARGE, DEFAULT_PLATFORM_FEE } from "./cart.js";
+
 export const customerOrdersRouter = Router();
 
 function isCouponApplicableToOrder(coupon, items) {
@@ -164,6 +166,46 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
             couponConnect = { connect: { id: coupon.id } };
         }
 
+        const netTotal = Math.max(0, total - discountAmount);
+        let isFreeShipping = coupon?.discountType === 'FREE_SHIPPING';
+
+        if (!isFreeShipping) {
+            const now = new Date();
+            const freeShippingCoupons = await prisma.coupon.findMany({
+                where: {
+                    discountType: 'FREE_SHIPPING',
+                    status: 'ACTIVE',
+                    startDate: { lte: now },
+                    OR: [{ endDate: null }, { endDate: { gte: now } }]
+                },
+                orderBy: { minOrderAmount: 'asc' }
+            });
+
+            for (const candidate of freeShippingCoupons) {
+                const minAmt = Number(candidate.minOrderAmount || 0);
+                if (netTotal < minAmt) continue;
+                if (candidate.usageLimit !== null && candidate.usageLimit !== undefined && candidate.usedCount >= candidate.usageLimit) continue;
+                if (candidate.usageLimitPerUser !== null && candidate.usageLimitPerUser !== undefined) {
+                    const userUsageCount = await prisma.couponUsage.count({
+                        where: { couponId: candidate.id, userId: customer.userid }
+                    });
+                    if (userUsageCount >= candidate.usageLimitPerUser) continue;
+                }
+                if (candidate.isFirstOrder) {
+                    const orderCount = await prisma.order.count({ where: { customerId: customer.id } });
+                    if (orderCount > 0) continue;
+                }
+                if (!isCouponApplicableToOrder(candidate, dbItems)) continue;
+
+                isFreeShipping = true;
+                break;
+            }
+        }
+
+        const shippingCharge = isFreeShipping ? 0 : DEFAULT_SHIPPING_CHARGE;
+        const platformFee = DEFAULT_PLATFORM_FEE;
+        const grandTotal = Math.max(0, netTotal + shippingCharge + platformFee);
+
         const created = await prisma.$transaction(async (tx) => {
             const order = await tx.order.create({
                 data: {
@@ -171,7 +213,9 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
                     shopkeeper: { connect: { id: shopkeeperId } },
                     paymentType,
                     discountAmount,
-                    grandTotal: total - discountAmount,
+                    shippingCharge,
+                    platformFee,
+                    grandTotal,
                     couponCode: resolvedCouponCode,
                     ...(couponConnect ? { coupon: couponConnect } : {}),
                     deliveryAddress: { connect: { id: addressId } },

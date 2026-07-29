@@ -14,6 +14,9 @@ const razorpayInstance = new Razorpay({
 });
 
 
+export const DEFAULT_SHIPPING_CHARGE = Number(process.env.DEFAULT_SHIPPING_CHARGE || 50);
+export const DEFAULT_PLATFORM_FEE = Number(process.env.DEFAULT_PLATFORM_FEE || 10);
+
 async function createOrderFromCart({
     customerId,
     addressId,
@@ -56,6 +59,11 @@ async function createOrderFromCart({
         imageUrl: item.product.images?.[0] || null
     }));
 
+    const isFreeShipping = cart.coupon?.discountType === 'FREE_SHIPPING';
+    const shippingCharge = isFreeShipping ? 0 : DEFAULT_SHIPPING_CHARGE;
+    const platformFee = DEFAULT_PLATFORM_FEE;
+    const grandTotal = Math.max(0, subtotal - discountAmount + shippingCharge + platformFee);
+
     return prisma.$transaction(async (tx) => {
 
         const order = await tx.order.create({
@@ -70,11 +78,13 @@ async function createOrderFromCart({
                     }
                 },
 
-                paymentType: "ONLINE",
+                paymentType: paymentType || "ONLINE",
 
                 discountAmount,
+                shippingCharge,
+                platformFee,
 
-                grandTotal: subtotal - discountAmount,
+                grandTotal,
 
                 deliveryAddress: {
                     connect: { id: addressId }
@@ -82,13 +92,32 @@ async function createOrderFromCart({
 
                 orderItems: {
                     create: orderItems
-                }
+                },
+
+                ...(cart.coupon ? {
+                    couponCode: cart.coupon.code,
+                    coupon: { connect: { id: cart.coupon.id } }
+                } : {})
             },
 
             include: {
                 orderItems: true
             }
         });
+
+        if (cart.coupon) {
+            await tx.coupon.update({
+                where: { id: cart.coupon.id },
+                data: { usedCount: { increment: 1 } }
+            });
+            await tx.couponUsage.create({
+                data: {
+                    couponId: cart.coupon.id,
+                    userId: customer.userid,
+                    orderId: order.id
+                }
+            });
+        }
 
         // Create payment row for ONLINE
         if (paymentData) {
@@ -98,7 +127,7 @@ async function createOrderFromCart({
                     orderId: order.id,
                     method: 'UPI',
                     status: 'CAPTURED',
-                    amount: subtotal - discountAmount,
+                    amount: grandTotal,
 
                     gatewayOrderId:
                         paymentData.razorpay_order_id,
@@ -163,6 +192,125 @@ async function getOrCreateCart(customerId) {
     });
 }
 
+async function evaluateFreeShipping(cart, subtotal, customerId) {
+    if (!cart || !cart.items || cart.items.length === 0) {
+        if (cart && cart.coupon && cart.coupon.discountType === 'FREE_SHIPPING') {
+            await prisma.cart.update({
+                where: { id: cart.id },
+                data: { couponId: null }
+            });
+            cart.coupon = null;
+            cart.couponId = null;
+        }
+        return { isFreeShipping: false, amountNeededForFreeShipping: 0, freeShippingCoupon: null };
+    }
+
+    const customer = await prisma.customer.findUnique({
+        where: { id: customerId },
+        select: { userid: true }
+    });
+
+    let promoDiscount = 0;
+    if (cart.coupon && cart.coupon.discountType !== 'FREE_SHIPPING') {
+        promoDiscount = calculateCouponDiscount(cart.coupon, subtotal);
+    }
+    const netAmount = Math.max(0, subtotal - promoDiscount);
+
+    const now = new Date();
+    const freeShippingCoupons = await prisma.coupon.findMany({
+        where: {
+            discountType: 'FREE_SHIPPING',
+            status: 'ACTIVE',
+            startDate: { lte: now },
+            OR: [{ endDate: null }, { endDate: { gte: now } }]
+        },
+        orderBy: { minOrderAmount: 'asc' }
+    });
+
+    let bestEligibleCoupon = null;
+    let minNeededForClosestFreeShipping = null;
+    let isFreeShippingQualified = false;
+
+    for (const coupon of freeShippingCoupons) {
+        const minAmt = Number(coupon.minOrderAmount || 0);
+
+        if (netAmount < minAmt) {
+            const needed = minAmt - netAmount;
+            if (minNeededForClosestFreeShipping === null || needed < minNeededForClosestFreeShipping) {
+                minNeededForClosestFreeShipping = needed;
+            }
+            continue;
+        }
+
+        if (coupon.usageLimit !== null && coupon.usageLimit !== undefined && coupon.usedCount >= coupon.usageLimit) {
+            continue;
+        }
+
+        if (coupon.usageLimitPerUser !== null && coupon.usageLimitPerUser !== undefined && customer) {
+            const userUsageCount = await prisma.couponUsage.count({
+                where: { couponId: coupon.id, userId: customer.userid }
+            });
+            if (userUsageCount >= coupon.usageLimitPerUser) {
+                continue;
+            }
+        }
+
+        if (coupon.isFirstOrder) {
+            const orderCount = await prisma.order.count({ where: { customerId } });
+            if (orderCount > 0) {
+                continue;
+            }
+        }
+
+        if (!isCouponApplicableToItems(coupon, cart.items)) {
+            continue;
+        }
+
+        isFreeShippingQualified = true;
+        bestEligibleCoupon = coupon;
+        break;
+    }
+
+    if (bestEligibleCoupon) {
+        if (!cart.coupon) {
+            await prisma.cart.update({
+                where: { id: cart.id },
+                data: { couponId: bestEligibleCoupon.id }
+            });
+            cart.coupon = bestEligibleCoupon;
+            cart.couponId = bestEligibleCoupon.id;
+        } else if (cart.coupon.discountType === 'FREE_SHIPPING') {
+            if (cart.couponId !== bestEligibleCoupon.id) {
+                await prisma.cart.update({
+                    where: { id: cart.id },
+                    data: { couponId: bestEligibleCoupon.id }
+                });
+                cart.coupon = bestEligibleCoupon;
+                cart.couponId = bestEligibleCoupon.id;
+            }
+        }
+    } else {
+        if (cart.coupon && cart.coupon.discountType === 'FREE_SHIPPING') {
+            await prisma.cart.update({
+                where: { id: cart.id },
+                data: { couponId: null }
+            });
+            cart.coupon = null;
+            cart.couponId = null;
+        }
+    }
+
+    if (cart.coupon?.discountType === 'FREE_SHIPPING') {
+        isFreeShippingQualified = true;
+    }
+
+    return {
+        isFreeShipping: isFreeShippingQualified,
+        freeShippingCoupon: bestEligibleCoupon || (cart.coupon?.discountType === 'FREE_SHIPPING' ? cart.coupon : null),
+        amountNeededForFreeShipping: isFreeShippingQualified ? 0 : (minNeededForClosestFreeShipping || 0)
+    };
+}
+
 async function loadCart(customerId) {
     const customer = await prisma.customer.findUnique({
         where: { id: customerId },
@@ -187,47 +335,51 @@ async function loadCart(customerId) {
         }
     });
 
-    if (cart && cart.coupon) {
-        let isApplicable = true;
-
-        // Check standard validations (status, dates, usage limit, minOrderAmount)
+    if (cart) {
         const subtotal = cart.items.reduce((sum, item) => sum + (Number(item.variant.sellingPrice) * item.quantity), 0);
-        const validation = isCouponValid(cart.coupon, subtotal);
-        if (!validation.valid) {
-            isApplicable = false;
-        }
 
-        // Check first order requirement
-        if (isApplicable && cart.coupon.isFirstOrder) {
-            const orderCount = await prisma.order.count({ where: { customerId } });
-            if (orderCount > 0) {
+        if (cart.coupon) {
+            let isApplicable = true;
+
+            const validation = isCouponValid(cart.coupon, subtotal);
+            if (!validation.valid) {
                 isApplicable = false;
+            }
+
+            if (isApplicable && cart.coupon.isFirstOrder) {
+                const orderCount = await prisma.order.count({ where: { customerId } });
+                if (orderCount > 0) {
+                    isApplicable = false;
+                }
+            }
+
+            if (isApplicable && !isCouponApplicableToItems(cart.coupon, cart.items)) {
+                isApplicable = false;
+            }
+
+            if (isApplicable && cart.coupon.usageLimitPerUser !== null && cart.coupon.usageLimitPerUser !== undefined) {
+                const userUsageCount = await prisma.couponUsage.count({
+                    where: { couponId: cart.coupon.id, userId: customer.userid }
+                });
+                if (userUsageCount >= cart.coupon.usageLimitPerUser) {
+                    isApplicable = false;
+                }
+            }
+
+            if (!isApplicable) {
+                await prisma.cart.update({
+                    where: { id: cart.id },
+                    data: { couponId: null }
+                });
+                cart.coupon = null;
+                cart.couponId = null;
             }
         }
 
-        // Check item/category applicability
-        if (isApplicable && !isCouponApplicableToItems(cart.coupon, cart.items)) {
-            isApplicable = false;
-        }
-
-        // Check usage limit per user
-        if (isApplicable && cart.coupon.usageLimitPerUser !== null && cart.coupon.usageLimitPerUser !== undefined) {
-            const userUsageCount = await prisma.couponUsage.count({
-                where: { couponId: cart.coupon.id, userId: customer.userid }
-            });
-            if (userUsageCount >= cart.coupon.usageLimitPerUser) {
-                isApplicable = false;
-            }
-        }
-
-        if (!isApplicable) {
-            await prisma.cart.update({
-                where: { id: cart.id },
-                data: { couponId: null }
-            });
-            cart.coupon = null;
-            cart.couponId = null;
-        }
+        const freeShipEval = await evaluateFreeShipping(cart, subtotal, customerId);
+        cart._isFreeShipping = freeShipEval.isFreeShipping;
+        cart._freeShippingCoupon = freeShipEval.freeShippingCoupon;
+        cart._amountNeededForFreeShipping = freeShipEval.amountNeededForFreeShipping;
     }
 
     return cart;
@@ -263,7 +415,19 @@ async function getItemCount(customerId) {
 
 function shapeCart(cart, userWishlistVariantIds = new Set(), userWishlistProductIds = new Set()) {
     if (!cart) {
-        return { id: null, coupon: null, items: [], subtotal: 0, itemCount: 0 };
+        return {
+            id: null,
+            coupon: null,
+            items: [],
+            subtotal: 0,
+            discount: 0,
+            shippingCharge: DEFAULT_SHIPPING_CHARGE,
+            platformFee: DEFAULT_PLATFORM_FEE,
+            total: DEFAULT_SHIPPING_CHARGE + DEFAULT_PLATFORM_FEE,
+            isFreeShipping: false,
+            amountNeededForFreeShipping: 0,
+            itemCount: 0
+        };
     }
 
     const items = cart.items.map((item) => ({
@@ -280,12 +444,24 @@ function shapeCart(cart, userWishlistVariantIds = new Set(), userWishlistProduct
     }));
 
     const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+    const discount = calculateCouponDiscount(cart.coupon, subtotal);
+    const isFreeShipping = Boolean(cart._isFreeShipping) || cart.coupon?.discountType === 'FREE_SHIPPING';
+    const shippingCharge = isFreeShipping ? 0 : (items.length > 0 ? DEFAULT_SHIPPING_CHARGE : 0);
+    const platformFee = items.length > 0 ? DEFAULT_PLATFORM_FEE : 0;
+    const total = Math.max(0, subtotal - discount + shippingCharge + platformFee);
 
     return {
         id: cart.id,
         coupon: cart.coupon,
+        freeShippingCoupon: cart._freeShippingCoupon || (cart.coupon?.discountType === 'FREE_SHIPPING' ? cart.coupon : null),
         items,
         subtotal,
+        discount,
+        shippingCharge,
+        platformFee,
+        total,
+        isFreeShipping,
+        amountNeededForFreeShipping: cart._amountNeededForFreeShipping || 0,
         itemCount: items.length
     };
 }
@@ -621,6 +797,11 @@ customerCartRouter.post('/checkout', customerMiddleware, async (req, res) => {
             couponCode = cart.coupon.code;
         }
 
+        const isFreeShipping = Boolean(cart._isFreeShipping) || cart.coupon?.discountType === 'FREE_SHIPPING';
+        const shippingCharge = isFreeShipping ? 0 : DEFAULT_SHIPPING_CHARGE;
+        const platformFee = DEFAULT_PLATFORM_FEE;
+        const grandTotal = Math.max(0, subtotal - discountAmount + shippingCharge + platformFee);
+
         if (paymentType === 'COD') {
             const order = await createOrderFromCart({
                 customerId: req.customerid,
@@ -640,7 +821,7 @@ customerCartRouter.post('/checkout', customerMiddleware, async (req, res) => {
         else {
             const razorpayOrder =
                 await razorpayInstance.orders.create({
-                    amount: Math.round(subtotal * 100),
+                    amount: Math.round(grandTotal * 100),
                     currency: 'INR',
                     receipt: `receipt_${Date.now()}`
                 });
@@ -652,8 +833,6 @@ customerCartRouter.post('/checkout', customerMiddleware, async (req, res) => {
                 razorpayKeyId: process.env.RAZORPAY_KEY_ID,
             });
         }
-
-        return res.json({ success: true, order: created });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ success: false, message: 'Internal Server Error' });
@@ -741,8 +920,12 @@ customerCartRouter.post(
                     );
             }
 
+            const isFreeShipping = Boolean(cart._isFreeShipping) || cart.coupon?.discountType === 'FREE_SHIPPING';
+            const shippingCharge = isFreeShipping ? 0 : DEFAULT_SHIPPING_CHARGE;
+            const platformFee = DEFAULT_PLATFORM_FEE;
+
             const finalAmount =
-                subtotal - discountAmount;
+                Math.max(0, subtotal - discountAmount + shippingCharge + platformFee);
 
             // amount verify
 

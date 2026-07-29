@@ -66,6 +66,9 @@ couponRouter.get('/:id', shopkeeperMiddleware, async (req, res) => {
 
 couponRouter.post('/', shopkeeperMiddleware, async (req, res) => {
     const data = normalizeCouponBody(req.body);
+    if (data.discountType === 'FREE_SHIPPING' && data.discountValue === undefined) {
+        data.discountValue = 0;
+    }
     if (!data.code || !data.discountType || data.discountValue === undefined) {
         return res.status(400).json({ success: false, message: 'code, discountType and discountValue are required' });
     }
