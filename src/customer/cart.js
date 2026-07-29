@@ -161,6 +161,9 @@ async function createOrderFromCart({
         });
 
         return order;
+    }, {
+        maxWait: 10000,
+        timeout: 20000
     });
 }
 
