@@ -1,8 +1,7 @@
 import { Router } from "express";
-import { prisma } from '../../config/prismaConfig.js' // adjust path if different
+import { prisma } from '../../config/prismaConfig.js';
 import { customerMiddleware } from "../../middlewares/customerAuth.js";
-
-import { DEFAULT_SHIPPING_CHARGE, DEFAULT_PLATFORM_FEE } from "./cart.js";
+import { getPlatformSettings } from "../shopkeeper/settings.js";
 
 export const customerOrdersRouter = Router();
 
@@ -202,8 +201,9 @@ customerOrdersRouter.post('/', customerMiddleware, async (req, res) => {
             }
         }
 
-        const shippingCharge = isFreeShipping ? 0 : DEFAULT_SHIPPING_CHARGE;
-        const platformFee = DEFAULT_PLATFORM_FEE;
+        const settings = await getPlatformSettings();
+        const shippingCharge = isFreeShipping ? 0 : settings.shippingCharge;
+        const platformFee = settings.platformFee;
         const grandTotal = Math.max(0, netTotal + shippingCharge + platformFee);
 
         const created = await prisma.$transaction(async (tx) => {

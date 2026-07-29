@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from '../../config/prismaConfig.js';
 import { customerMiddleware } from "../../middlewares/customerAuth.js";
 import { getUserCartAndWishlistSets } from "./utils.js";
+import { getPlatformSettings } from "../shopkeeper/settings.js";
 
 import Razorpay from "razorpay";
 import crypto from "crypto"
@@ -59,9 +60,10 @@ async function createOrderFromCart({
         imageUrl: item.product.images?.[0] || null
     }));
 
-    const isFreeShipping = cart.coupon?.discountType === 'FREE_SHIPPING';
-    const shippingCharge = isFreeShipping ? 0 : DEFAULT_SHIPPING_CHARGE;
-    const platformFee = DEFAULT_PLATFORM_FEE;
+    const settings = await getPlatformSettings();
+    const isFreeShipping = Boolean(cart._isFreeShipping) || cart.coupon?.discountType === 'FREE_SHIPPING';
+    const shippingCharge = isFreeShipping ? 0 : settings.shippingCharge;
+    const platformFee = settings.platformFee;
     const grandTotal = Math.max(0, subtotal - discountAmount + shippingCharge + platformFee);
 
     return prisma.$transaction(async (tx) => {
@@ -376,10 +378,14 @@ async function loadCart(customerId) {
             }
         }
 
-        const freeShipEval = await evaluateFreeShipping(cart, subtotal, customerId);
+        const [freeShipEval, settings] = await Promise.all([
+            evaluateFreeShipping(cart, subtotal, customerId),
+            getPlatformSettings()
+        ]);
         cart._isFreeShipping = freeShipEval.isFreeShipping;
         cart._freeShippingCoupon = freeShipEval.freeShippingCoupon;
         cart._amountNeededForFreeShipping = freeShipEval.amountNeededForFreeShipping;
+        cart._settings = settings;
     }
 
     return cart;
@@ -413,17 +419,19 @@ async function getItemCount(customerId) {
     return cart || { _count: { items: 0 } };
 }
 
-function shapeCart(cart, userWishlistVariantIds = new Set(), userWishlistProductIds = new Set()) {
+function shapeCart(cart, userWishlistVariantIds = new Set(), userWishlistProductIds = new Set(), settings = null) {
+    const config = settings || cart?._settings || { shippingCharge: 50, platformFee: 10 };
     if (!cart) {
         return {
             id: null,
             coupon: null,
+            freeShippingCoupon: null,
             items: [],
             subtotal: 0,
             discount: 0,
-            shippingCharge: DEFAULT_SHIPPING_CHARGE,
-            platformFee: DEFAULT_PLATFORM_FEE,
-            total: DEFAULT_SHIPPING_CHARGE + DEFAULT_PLATFORM_FEE,
+            shippingCharge: config.shippingCharge,
+            platformFee: config.platformFee,
+            total: config.shippingCharge + config.platformFee,
             isFreeShipping: false,
             amountNeededForFreeShipping: 0,
             itemCount: 0
@@ -446,8 +454,8 @@ function shapeCart(cart, userWishlistVariantIds = new Set(), userWishlistProduct
     const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
     const discount = calculateCouponDiscount(cart.coupon, subtotal);
     const isFreeShipping = Boolean(cart._isFreeShipping) || cart.coupon?.discountType === 'FREE_SHIPPING';
-    const shippingCharge = isFreeShipping ? 0 : (items.length > 0 ? DEFAULT_SHIPPING_CHARGE : 0);
-    const platformFee = items.length > 0 ? DEFAULT_PLATFORM_FEE : 0;
+    const shippingCharge = isFreeShipping ? 0 : (items.length > 0 ? config.shippingCharge : 0);
+    const platformFee = items.length > 0 ? config.platformFee : 0;
     const total = Math.max(0, subtotal - discount + shippingCharge + platformFee);
 
     return {
@@ -499,7 +507,8 @@ customerCartRouter.get('/', customerMiddleware, async (req, res) => {
     try {
         const cart = await loadCart(req.customerid);
         const { userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
-        return res.json({ success: true, cart: shapeCart(cart, userWishlistVariantIds, userWishlistProductIds) });
+        const settings = cart?._settings || await getPlatformSettings();
+        return res.json({ success: true, cart: shapeCart(cart, userWishlistVariantIds, userWishlistProductIds, settings) });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ success: false, message: 'Something went wrong' });
@@ -509,8 +518,8 @@ customerCartRouter.get('/', customerMiddleware, async (req, res) => {
 customerCartRouter.get('/summary', customerMiddleware, async (req, res) => {
     try {
         const cart = await loadCart(req.customerid);
-        const shaped = shapeCart(cart);
-        const discount = calculateCouponDiscount(cart?.coupon, shaped.subtotal);
+        const settings = cart?._settings || await getPlatformSettings();
+        const shaped = shapeCart(cart, new Set(), new Set(), settings);
 
         return res.json({
             success: true,
@@ -518,9 +527,14 @@ customerCartRouter.get('/summary', customerMiddleware, async (req, res) => {
                 cartId: shaped.id,
                 itemCount: shaped.itemCount,
                 subtotal: shaped.subtotal,
-                discount,
-                total: shaped.subtotal - discount,
-                coupon: shaped.coupon
+                discount: shaped.discount,
+                shippingCharge: shaped.shippingCharge,
+                platformFee: shaped.platformFee,
+                total: shaped.total,
+                isFreeShipping: shaped.isFreeShipping,
+                amountNeededForFreeShipping: shaped.amountNeededForFreeShipping,
+                coupon: shaped.coupon,
+                freeShippingCoupon: shaped.freeShippingCoupon
             }
         });
     } catch (err) {
@@ -797,9 +811,10 @@ customerCartRouter.post('/checkout', customerMiddleware, async (req, res) => {
             couponCode = cart.coupon.code;
         }
 
+        const settings = cart?._settings || await getPlatformSettings();
         const isFreeShipping = Boolean(cart._isFreeShipping) || cart.coupon?.discountType === 'FREE_SHIPPING';
-        const shippingCharge = isFreeShipping ? 0 : DEFAULT_SHIPPING_CHARGE;
-        const platformFee = DEFAULT_PLATFORM_FEE;
+        const shippingCharge = isFreeShipping ? 0 : settings.shippingCharge;
+        const platformFee = settings.platformFee;
         const grandTotal = Math.max(0, subtotal - discountAmount + shippingCharge + platformFee);
 
         if (paymentType === 'COD') {
@@ -920,9 +935,10 @@ customerCartRouter.post(
                     );
             }
 
+            const settings = cart?._settings || await getPlatformSettings();
             const isFreeShipping = Boolean(cart._isFreeShipping) || cart.coupon?.discountType === 'FREE_SHIPPING';
-            const shippingCharge = isFreeShipping ? 0 : DEFAULT_SHIPPING_CHARGE;
-            const platformFee = DEFAULT_PLATFORM_FEE;
+            const shippingCharge = isFreeShipping ? 0 : settings.shippingCharge;
+            const platformFee = settings.platformFee;
 
             const finalAmount =
                 Math.max(0, subtotal - discountAmount + shippingCharge + platformFee);
