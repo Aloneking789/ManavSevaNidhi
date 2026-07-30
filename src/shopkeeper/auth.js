@@ -13,6 +13,7 @@ function signShopkeeperToken(shopkeeperId, userId) {
         process.env.JWT_SECRET,
         { expiresIn: '30d' }
     );
+    // dummy change
 }
 
 function buildProfileSelection(user) {
