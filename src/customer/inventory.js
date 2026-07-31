@@ -301,117 +301,9 @@ customerInventoryRouter.get(
                     take: Number(limit)
                 });
 
-            // =========================
-            // VARIANT SEARCH
-            // =========================
-
-            const matchedVariants =
-                await prisma.productVariant.findMany({
-
-                    where: {
-
-                        isActive: true,
-
-                        OR: [
-
-                            {
-                                name: {
-                                    contains: search,
-                                    mode: 'insensitive'
-                                }
-                            },
-
-                            {
-                                sku: {
-                                    contains: search,
-                                    mode: 'insensitive'
-                                }
-                            },
-
-                            {
-                                product: {
-                                    title: {
-                                        contains: search,
-                                        mode: 'insensitive'
-                                    }
-                                }
-                            }
-                        ]
-                    },
-
-                    include: {
-
-                        product: {
-
-                            include: {
-
-                                category: true
-                            }
-                        }
-                    },
-
-                    take: Number(limit)
-                });
-
-            // =========================
-            // REMOVE DUPLICATES
-            // =========================
-
-            const itemIds =
-                new Set(
-                    matchedItems.map(
-                        item => item.id
-                    )
-                );
-
-            // Only keep variants whose
-            // products were NOT already matched
-
-            const filteredVariants =
-                matchedVariants.filter(
-                    variant =>
-                        !itemIds.has(
-                            variant.productId
-                        )
-                );
-
-            // =========================
-            // FORMAT VARIANT RESULTS
-            // =========================
-
-            const variantResults =
-                filteredVariants.map(
-                    variant => {
-                        const isAddedToCart = userCartVariantIds.has(variant.id);
-                        const isAddedToWishlist = userWishlistVariantIds.has(variant.id) || userWishlistProductIds.has(variant.product.id);
-                        const mappedVariant = {
-                            ...variant,
-                            isAddedToCart,
-                            isAddedToWishlist
-                        };
-                        return {
-                            id: variant.product.id,
-                            title: variant.product.title,
-                            slug: variant.product.slug,
-                            images: variant.product.images,
-                            shortDescription: variant.product.shortDescription,
-                            averageRating: variant.product.averageRating,
-                            totalReviews: variant.product.totalReviews,
-                            category: variant.product.category,
-                            matchedVariants: [
-                                mappedVariant
-                            ]
-                        };
-                    }
-                );
-
-            // =========================
-            // FORMAT ITEM RESULTS
-            // =========================
-
             const itemResults =
                 matchedItems.map(item => {
-                    const mappedVariants = item.variants.map(variant => {
+                    const mappedVariants = (item.variants || []).map(variant => {
                         const isAddedToCart = userCartVariantIds.has(variant.id);
                         const isAddedToWishlist = userWishlistVariantIds.has(variant.id) || userWishlistProductIds.has(item.id);
                         return {
@@ -420,6 +312,7 @@ customerInventoryRouter.get(
                             isAddedToWishlist
                         };
                     });
+
                     return {
                         ...item,
                         variants: mappedVariants,
@@ -427,24 +320,10 @@ customerInventoryRouter.get(
                     };
                 });
 
-            // =========================
-            // FINAL RESPONSE
-            // =========================
-
             return res.status(200).json({
-
                 success: true,
-
-                total:
-                    itemResults.length +
-                    variantResults.length,
-
-                items: [
-
-                    ...itemResults,
-
-                    ...variantResults
-                ]
+                total: itemResults.length,
+                items: itemResults
             });
 
         } catch (err) {
