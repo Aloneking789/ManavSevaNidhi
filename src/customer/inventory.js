@@ -789,17 +789,63 @@ customerInventoryRouter.get(
         const { id } = req.params;
 
         try {
-            // 1. Fetch the Item with its relations
+            // 1. Fetch the Item with optimized field selection
             const item = await prisma.item.findFirst({
                 where: {
                     OR: [{ id }, { slug: id }],
                     isActive: true
                 },
-                include: {
-                    faqs: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
-                    sections: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+                select: {
+                    id: true,
+                    title: true,
+                    slug: true,
+                    shortDescription: true,
+                    description: true,
+                    images: true,
+                    featuredImage: true,
+                    howToUse: true,
+                    productYtLink: true,
+                    productHowToVidLink: true,
+                    isBestSeller: true,
+                    isFeatured: true,
+                    isBundle: true,
+                    tags: true,
+                    warranty: true,
+                    availability: true,
+                    categoryId: true,
+                    category: {
+                        select: {
+                            id: true,
+                            title: true,
+                            slug: true
+                        }
+                    },
+                    shopkeeper: {
+                        select: {
+                            id: true,
+                            shopname: true,
+                            shopaddress: {
+                                select: {
+                                    flatnumber: true,
+                                    city: true,
+                                    state: true,
+                                    pincode: true
+                                }
+                            }
+                        }
+                    },
                     variants: {
-                        include: {
+                        select: {
+                            id: true,
+                            name: true,
+                            sku: true,
+                            mrp: true,
+                            sellingPrice: true,
+                            stockQty: true,
+                            lowStockAlert: true,
+                            isDefault: true,
+                            averageRating: true,
+                            totalReviews: true,
                             reviews: {
                                 where: { status: 'APPROVED' },
                                 select: {
@@ -812,45 +858,23 @@ customerInventoryRouter.get(
                             }
                         }
                     },
-                    category: {
+                    faqs: {
+                        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+                        select: {
+                            id: true,
+                            question: true,
+                            answer: true,
+                            sortOrder: true
+                        }
+                    },
+                    sections: {
+                        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
                         select: {
                             id: true,
                             title: true,
-                            slug: true,
                             description: true,
                             imageUrl: true,
-                            bannerUrl: true,
-                            parentId: true,
-                            isActive: true,
-                            sortOrder: true,
-                            metaTitle: true,
-                            metaDesc: true,
-                            createdAt: true
-                        }
-                    },
-                    shopkeeper: {
-                        select: {
-                            id: true,
-                            shopname: true,
-                            shopaddress: {
-                                select: {
-                                    id: true,
-                                    city: true,
-                                    state: true,
-                                    pincode: true,
-                                    flatnumber: true,
-                                    latitude: true,
-                                    longitude: true
-                                }
-                            },
-                            user: {
-                                select: {
-                                    name: true,
-                                    email: true,
-                                    phone: true,
-                                    profileimage: true
-                                }
-                            }
+                            sortOrder: true
                         }
                     }
                 }
@@ -873,17 +897,20 @@ customerInventoryRouter.get(
             // =========================
             item.variants = item.variants.map((variant) => {
                 // Ratings calculation
-                const totalReviews = variant.reviews.length;
-                const averageRating = totalReviews > 0
+                const totalReviews = (variant.reviews && variant.reviews.length > 0)
+                    ? variant.reviews.length
+                    : (variant.totalReviews || 0);
+
+                const averageRating = (variant.reviews && variant.reviews.length > 0)
                     ? Number(
                         (
                             variant.reviews.reduce(
                                 (sum, review) => sum + review.rating,
                                 0
-                            ) / totalReviews
+                            ) / variant.reviews.length
                         ).toFixed(1)
                     )
-                    : null;
+                    : (variant.averageRating || null);
 
                 // Dynamic Cart & Wishlist Flags
                 const isAddedToCart = userCartVariantIds.has(variant.id);
