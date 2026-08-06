@@ -58,6 +58,8 @@ const publicItemSelect = {
 
     isBestSeller: true,
 
+    isBundle: true,
+
     createdAt: true,
 
     categoryId: true,
@@ -352,7 +354,6 @@ customerInventoryRouter.get(
                 next
             );
         }
-
         next();
 
     },
@@ -363,46 +364,134 @@ customerInventoryRouter.get(
 
             const { userCartVariantIds, userWishlistVariantIds, userWishlistProductIds } = await getUserCartAndWishlistSets(req.customerid);
 
-            const items =
-                await prisma.item.findMany({
+            const {
+                page,
+                limit = 10,
+                isBestSeller,
+                isFeatured,
+                isBundle,
+                categoryId,
+                search,
+                q
+            } = req.query;
 
-                    where: {
-                        isActive: true
-                    },
+            const where = {
+                isActive: true
+            };
 
-                    select: publicItemSelect
-                });
-
-            const formattedItems =
-                items.map((item) => {
-
-                    const defaultVariant =
-                        item.variants.find(
-                            variant =>
-                                variant.isDefault
-                        ) || null;
-
-                    let mappedDefaultVariant = null;
-                    if (defaultVariant) {
-                        mappedDefaultVariant = {
-                            ...defaultVariant,
-                            isAddedToCart: userCartVariantIds.has(defaultVariant.id),
-                            isAddedToWishlist: userWishlistVariantIds.has(defaultVariant.id) || userWishlistProductIds.has(item.id)
-                        };
+            // Dynamic filter for isBestSeller
+            if (isBestSeller !== undefined) {
+                if (typeof isBestSeller === 'boolean') {
+                    where.isBestSeller = isBestSeller;
+                } else if (typeof isBestSeller === 'string') {
+                    const lower = isBestSeller.toLowerCase().trim();
+                    if (lower === 'true' || lower === '1') {
+                        where.isBestSeller = true;
+                    } else if (lower === 'false' || lower === '0') {
+                        where.isBestSeller = false;
                     }
+                }
+            }
 
-                    delete item.variants;
+            // Dynamic filter for isFeatured
+            if (isFeatured !== undefined) {
+                if (typeof isFeatured === 'boolean') {
+                    where.isFeatured = isFeatured;
+                } else if (typeof isFeatured === 'string') {
+                    const lower = isFeatured.toLowerCase().trim();
+                    if (lower === 'true' || lower === '1') {
+                        where.isFeatured = true;
+                    } else if (lower === 'false' || lower === '0') {
+                        where.isFeatured = false;
+                    }
+                }
+            }
 
-                    return {
+            // Dynamic filter for isBundle
+            if (isBundle !== undefined) {
+                if (typeof isBundle === 'boolean') {
+                    where.isBundle = isBundle;
+                } else if (typeof isBundle === 'string') {
+                    const lower = isBundle.toLowerCase().trim();
+                    if (lower === 'true' || lower === '1') {
+                        where.isBundle = true;
+                    } else if (lower === 'false' || lower === '0') {
+                        where.isBundle = false;
+                    }
+                }
+            }
 
-                        ...item,
+            // Dynamic filter for categoryId
+            if (categoryId) {
+                where.categoryId = String(categoryId);
+            }
 
-                        defaultVariant: mappedDefaultVariant
+            // Dynamic filter for search / q
+            const searchQuery = (search || q) ? String(search || q).trim() : null;
+            if (searchQuery) {
+                where.OR = [
+                    { title: { contains: searchQuery, mode: 'insensitive' } },
+                    { shortDescription: { contains: searchQuery, mode: 'insensitive' } },
+                    { description: { contains: searchQuery, mode: 'insensitive' } },
+                    { tags: { has: searchQuery } },
+                    { slug: { contains: searchQuery, mode: 'insensitive' } }
+                ];
+            }
+
+            // Calculate pagination
+            const pageNum = Math.max(1, parseInt(page, 10) || 1);
+            const limitNum = Math.max(1, parseInt(limit, 10) || 10);
+            const skip = (pageNum - 1) * limitNum;
+
+            const [totalItems, items] = await Promise.all([
+                prisma.item.count({ where }),
+                prisma.item.findMany({
+                    where,
+                    select: publicItemSelect,
+                    skip,
+                    take: limitNum,
+                    orderBy: { createdAt: 'desc' }
+                })
+            ]);
+
+            const totalPages = Math.ceil(totalItems / limitNum) || 1;
+
+            const formattedItems = items.map((item) => {
+
+                const defaultVariant =
+                    item.variants.find(
+                        variant => variant.isDefault
+                    ) || item.variants[0] || null;
+
+                let mappedDefaultVariant = null;
+                if (defaultVariant) {
+                    mappedDefaultVariant = {
+                        ...defaultVariant,
+                        isAddedToCart: userCartVariantIds.has(defaultVariant.id),
+                        isAddedToWishlist: userWishlistVariantIds.has(defaultVariant.id) || userWishlistProductIds.has(item.id)
                     };
-                });
+                }
+
+                delete item.variants;
+
+                return {
+                    ...item,
+                    defaultVariant: mappedDefaultVariant
+                };
+            });
 
             return res.status(200).json({
                 success: true,
+                totalItems,
+                totalPages,
+                currentPage: pageNum,
+                limit: limitNum,
+                pagination: {
+                    totalItems,
+                    totalPages,
+                    currentPage: pageNum,
+                    limit: limitNum
+                },
                 items: formattedItems
             });
 
