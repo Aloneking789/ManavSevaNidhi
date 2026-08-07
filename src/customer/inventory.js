@@ -117,6 +117,8 @@ const publicItemSelect = {
 
             isDefault: true,
 
+            weight: true,
+
             averageRating: true,
 
             totalReviews: true
@@ -844,6 +846,7 @@ customerInventoryRouter.get(
                             stockQty: true,
                             lowStockAlert: true,
                             isDefault: true,
+                            weight: true,
                             averageRating: true,
                             totalReviews: true,
                             reviews: {
