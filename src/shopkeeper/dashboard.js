@@ -31,7 +31,11 @@ dashboardRouter.get('/', shopkeeperMiddleware, async (req, res) => {
         take: 5,
         select: {
           id: true,
+<<<<<<< HEAD
           totalPrice: true,
+=======
+          grandTotal: true,
+>>>>>>> 432161d580f7faffe000feab8940a0bab9206b04
           status: true,
           createdAt: true,
           customer: { select: { user: { select: { name: true, email: true } } } },

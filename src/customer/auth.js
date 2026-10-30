@@ -59,8 +59,13 @@ authRouter.post('/signup', async (req, res) => {
     const resolvedAvatar = avatar || profileimage;
     const parsedDateOfBirth = parseValidDate(dateOfBirth);
 
+<<<<<<< HEAD
     if (!email || !password || !name || !gender || !parsedDateOfBirth || !resolvedAvatar) {
         return res.status(400).json({ success: false, message: 'email, password, name, gender, dateOfBirth, and avatar are required' });
+=======
+    if (!email || !password || !name || !gender) {
+        return res.status(400).json({ success: false, message: 'email, password, name, gender' });
+>>>>>>> 432161d580f7faffe000feab8940a0bab9206b04
     }
 
     try {

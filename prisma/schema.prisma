@@ -271,45 +271,45 @@ enum Unit {
 }
 
 model Item {
-  id               String           @id @default(uuid())
-  title            String
-  images           String[]         @db.VarChar(255)
-  featuredImage    String?
-  unit             Unit
-  isFeatured       Boolean          @default(false)
-  isBestSeller     Boolean          @default(false)
-  howToUse         String?
+  id                  String           @id @default(uuid())
+  title               String
+  images              String[]         @db.VarChar(255)
+  featuredImage       String?
+  unit                Unit
+  isFeatured          Boolean          @default(false)
+  isBestSeller        Boolean          @default(false)
+  howToUse            String?
   productHowToVidLink String?
-  productYtLink    String?
-  slug             String           @unique
-  shortDescription String?
-  isActive         Boolean          @default(true)
-  benefits         String[] // bullet points
-  skinType         String[] // oily, dry, combination, all
-  minimumpurchase  Int              @default(0)
-  description      String
-  isBundle         Boolean          @default(false)
-  metaTitle        String?
-  metaDesc         String?
-  tags             String[]
-  warranty         String?
-  availability     String?          @default("In Stock")
-  addons           String[]
-  concerns         ProductConcern[]
-  variants         ProductVariant[]
-  wishlistItems    WishlistItem[]
-  averageRating    Float            @default(0)
-  totalReviews     Int              @default(0)
-  shopkeeper       Shopkeeper       @relation(fields: [shopkeeperId], references: [id])
-  shopkeeperId     String
-  category         Category         @relation(fields: [categoryId], references: [id])
-  categoryId       String
-  orderItems       OrderItem[]
-  createdAt        DateTime         @default(now())
-  cartItems        CartItem[]
-  reviews          Review[]
-  faqs             ProductFaq[]
-  sections         ProductSection[]
+  productYtLink       String?
+  slug                String           @unique
+  shortDescription    String?
+  isActive            Boolean          @default(true)
+  benefits            String[]
+  skinType            String[]
+  minimumpurchase     Int              @default(0)
+  description         String
+  isBundle            Boolean          @default(false)
+  metaTitle           String?
+  metaDesc            String?
+  tags                String[]
+  warranty            String?
+  availability        String?          @default("In Stock")
+  addons              String[]
+  concerns            ProductConcern[]
+  variants            ProductVariant[]
+  wishlistItems       WishlistItem[]
+  averageRating       Float            @default(0)
+  totalReviews        Int              @default(0)
+  shopkeeper          Shopkeeper       @relation(fields: [shopkeeperId], references: [id])
+  shopkeeperId        String
+  category            Category         @relation(fields: [categoryId], references: [id])
+  categoryId          String
+  orderItems          OrderItem[]
+  createdAt           DateTime         @default(now())
+  cartItems           CartItem[]
+  reviews             Review[]
+  faqs                ProductFaq[]
+  sections            ProductSection[]
 }
 
 model ProductFaq {
