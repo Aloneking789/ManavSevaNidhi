@@ -35,6 +35,6 @@ jobs:
       - name: Restart Backend & Worker
         run: |
           echo "Deploying at $(date '+%Y-%m-%d %H:%M:%S %Z')"
-          sudo pm2 restart manavsewa-ecom --update-env
+          pm2 restart manavsewa-ecom --update-env
           # Restart the notification worker if it exists, otherwise start it
-          sudo pm2 save
+          pm2 save
