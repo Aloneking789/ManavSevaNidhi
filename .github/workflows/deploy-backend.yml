@@ -1,0 +1,40 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync Backend Files
+        run: |
+          rsync -av --delete \
+            --exclude=node_modules \
+            --exclude=uploads \
+            --exclude=.git \
+            --exclude=.env \
+            $GITHUB_WORKSPACE/ \
+            /var/www/ecommerce-backend/
+
+      - name: Install Dependencies
+        run: |
+          cd /var/www/ecommerce-backend
+          # npm ci
+
+      - name: Generate Prisma Client
+        run: |
+          cd /var/www/ecommerce-backend
+          npx prisma generate
+
+      - name: Restart Backend & Worker
+        run: |
+          echo "Deploying at $(date '+%Y-%m-%d %H:%M:%S %Z')"
+          sudo pm2 restart manavsewa-ecom --update-env
+          # Restart the notification worker if it exists, otherwise start it
+          sudo pm2 save
