@@ -20,16 +20,16 @@ jobs:
             --exclude=.git \
             --exclude=.env \
             $GITHUB_WORKSPACE/ \
-            /var/www/ecommerce-backend/
+            /var/www/ecommerce-backend/ManavSevaNidhi/
 
       - name: Install Dependencies
         run: |
-          cd /var/www/ecommerce-backend
+          cd /var/www/ecommerce-backend/ManavSevaNidhi
           # npm ci
 
       - name: Generate Prisma Client
         run: |
-          cd /var/www/ecommerce-backend
+          cd /var/www/ecommerce-backend/ManavSevaNidhi
           npx prisma generate
 
       - name: Restart Backend & Worker
