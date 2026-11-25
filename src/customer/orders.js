@@ -381,6 +381,44 @@ customerOrdersRouter.get('/', customerMiddleware, async (req, res) => {
 /**
  * Get single order
  */
+customerOrdersRouter.get('/:id/payment', customerMiddleware, async (req, res) => {
+    try {
+        const order = await prisma.order.findFirst({
+            where: { id: req.params.id, customerId: req.customerid },
+            select: {
+                id: true,
+                paymentType: true,
+                status: true,
+                grandTotal: true,
+                createdAt: true,
+                payment: {
+                    select: {
+                        id: true,
+                        status: true,
+                        method: true,
+                        amount: true,
+                        currency: true,
+                        gatewayOrderId: true,
+                        gatewayPaymentId: true,
+                        paidAt: true,
+                        refundedAmount: true,
+                        refundedAt: true,
+                        refundReference: true,
+                        createdAt: true,
+                        updatedAt: true
+                    }
+                }
+            }
+        });
+
+        if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+        return res.json({ success: true, order });
+    } catch (err) {
+        console.error("Fetch customer order payment error:", err);
+        return res.status(500).json({ success: false, message: "Failed to fetch payment details" });
+    }
+});
+
 customerOrdersRouter.get('/:id', customerMiddleware, async (req, res) => {
     try {
         const order = await prisma.order.findFirst({

@@ -524,7 +524,8 @@ model User {
   gender       Gender        @default(MALE)
   dateOfBirth  DateTime?
   avatar       String?
-  profileimage String
+  profileimage String?
+  isProfilePublic Boolean   @default(false)
   cart         Cart?
   wishlist     Wishlist?
   customer     Customer?

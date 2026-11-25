@@ -475,7 +475,22 @@ curl -X PATCH http://localhost:3000/api/v1/owner/orders/ORDER_ID/reject \
   -H "Authorization: Bearer YOUR_JWT"
 ```
 
-## 9. Inventory Media Notes
+## 9. Payment transactions
+
+### GET `/payments`
+List recorded payment transactions for orders belonging to the authenticated shopkeeper. Results include booking/order details and are paginated (`page` defaults to `1`, `limit` defaults to `20`, maximum `100`). Use `orderId` to filter to one order. Payment signatures and raw gateway payloads are not returned.
+
+```bash
+curl "http://localhost:3000/api/v1/owner/payments?page=1&limit=20" \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
+```bash
+curl "http://localhost:3000/api/v1/owner/payments?orderId=ORDER_ID" \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
+## 10. Inventory Media Notes
 
 The item create/update endpoints already accept `images` uploads. The new `POST /inventory/item/:id/images` route is for appending more product images later without replacing the existing gallery.
 

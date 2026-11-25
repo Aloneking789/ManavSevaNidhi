@@ -157,6 +157,14 @@ curl http://localhost:3000/api/v1/user/orders/ORDER_ID \
   -H "Authorization: Bearer YOUR_CUSTOMER_JWT"
 ```
 
+### GET `/orders/:id/payment`
+Fetch payment status and transaction details for your own order. Payment signatures and raw gateway payloads are not returned. Orders without a recorded payment (such as COD orders) return `"payment": null`.
+
+```bash
+curl http://localhost:3000/api/v1/user/orders/ORDER_ID/payment \
+  -H "Authorization: Bearer YOUR_CUSTOMER_JWT"
+```
+
 ## 8. Wishlist
 
 ### GET `/wishlist`
